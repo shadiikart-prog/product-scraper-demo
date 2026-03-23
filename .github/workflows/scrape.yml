@@ -1,0 +1,39 @@
+name: Scrape Products & Update Dashboard
+
+on:
+  workflow_dispatch:        # Manual run button on GitHub
+  schedule:
+    - cron: '0 6 * * *'    # Auto daily at 6AM UTC
+
+jobs:
+  scrape-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests openpyxl
+
+      - name: Run scrapers
+        run: python scrapers/run_all_scrapers.py
+
+      - name: Embed data into dashboard
+        run: python scrapers/embed_data.py
+
+      - name: Commit updated dashboard
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add index.html
+          git add output/ || true
+          git diff --staged --quiet || git commit -m "Auto update: fresh product data $(date '+%Y-%m-%d %H:%M')"
+          git push
