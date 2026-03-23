@@ -9,28 +9,25 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
         run: pip install requests openpyxl
 
-      - name: List files (debug)
-        run: find . -name "*.py" | head -20
-
-      - name: Run HDEW scraper
+      - name: Run scrapers
         run: |
           cd scrapers
-          python scraper_hdew.py || python run_all_scrapers.py
+          python run_all_scrapers.py
+          ls -la output/
 
-      - name: Run embed
+      - name: Embed data into dashboard
         run: |
-          ls -la
-          ls -la scrapers/ || true
-          python scrapers/embed_data.py || python embed_data.py
+          cp -r scrapers/output ./output || true
+          python scrapers/embed_data.py
 
       - name: Push changes
         run: |
