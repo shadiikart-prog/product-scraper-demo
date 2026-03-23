@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Product Import Dashboard — BigCommerce Ready</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Clash+Display:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f7f6f3;
+  --surface: #ffffff;
+  --surface2: #f2f1ee;
+  --surface3: #e8e6e1;
+  --border: #e2e0db;
+  --border2: #d4d1ca;
+  --ink: #1a1917;
+  --ink2: #5c5954;
+  --ink3: #9c9890;
+  --accent: #1a56db;
+  --accent-bg: #eff4ff;
+  --green: #0d6e3d;
+  --green-bg: #ecfdf3;
+  --red: #b91c1c;
+  --red-bg: #fef2f2;
+  --amber: #92400e;
+  --amber-bg: #fffbeb;
+  --orange: #c2410c;
+  --mono: 'DM Mono', monospace;
+  --sans: 'Clash Display', sans-serif;
+  --r: 10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);min-height:100vh}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+
+/* ── Top bar ── */
+.topbar{
+  background:var(--ink);color:#fff;
+  padding:0 32px;height:56px;
+  display:flex;align-items:center;gap:16px;
+  position:sticky;top:0;z-index:200;
+}
+.topbar-logo{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:700;letter-spacing:-0.2px}
+.logo-dot{width:8px;height:8px;border-radius:50%;background:#4ade80}
+.topbar-right{margin-left:auto;display:flex;gap:8px;align-items:center}
+.tb-badge{
+  font-family:var(--mono);font-size:10px;
+  padding:4px 10px;border-radius:20px;
+  background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);
+  border:1px solid rgba(255,255,255,0.15);
+}
+.tb-badge.live{background:rgba(74,222,128,0.15);color:#4ade80;border-color:rgba(74,222,128,0.3)}
+
+/* ── Layout ── */
+.layout{display:flex;height:calc(100vh - 56px)}
+.sidebar{
+  width:220px;min-width:220px;
+  background:var(--surface);
+  border-right:1px solid var(--border);
+  padding:20px 0;overflow-y:auto;
+}
+.content{flex:1;overflow-y:auto;overflow-x:hidden}
+
+/* ── Sidebar ── */
+.s-section{margin-bottom:24px}
+.s-label{
+  font-family:var(--mono);font-size:9px;
+  letter-spacing:0.12em;color:var(--ink3);
+  text-transform:uppercase;
+  padding:0 16px;margin-bottom:6px;
+}
+.s-item{
+  display:flex;align-items:center;gap:8px;
+  padding:8px 16px;cursor:pointer;
+  font-size:12px;font-weight:600;color:var(--ink2);
+  border-left:2px solid transparent;
+  transition:all .15s;user-select:none;
+}
+.s-item:hover{background:var(--surface2);color:var(--ink)}
+.s-item.active{color:var(--accent);background:var(--accent-bg);border-left-color:var(--accent)}
+.s-count{margin-left:auto;font-family:var(--mono);font-size:9px;color:var(--ink3);background:var(--surface2);padding:2px 6px;border-radius:10px}
+.s-item.active .s-count{background:rgba(26,86,219,0.1);color:var(--accent)}
+
+/* ── Stats row ── */
+.stats-row{
+  display:grid;grid-template-columns:repeat(5,1fr);
+  border-bottom:1px solid var(--border);
+  background:var(--surface);
+}
+.stat{padding:20px 24px;border-right:1px solid var(--border)}
+.stat:last-child{border-right:none}
+.stat-l{font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--ink3);text-transform:uppercase;margin-bottom:6px}
+.stat-v{font-size:26px;font-weight:700;letter-spacing:-1px;line-height:1}
+.stat-s{font-size:10px;color:var(--ink3);margin-top:4px;font-family:var(--mono)}
+.c-blue{color:var(--accent)}
+.c-green{color:var(--green)}
+.c-red{color:var(--red)}
+.c-amber{color:var(--amber)}
+
+/* ── Toolbar ── */
+.toolbar{
+  display:flex;align-items:center;gap:10px;
+  padding:12px 20px;border-bottom:1px solid var(--border);
+  background:var(--surface);position:sticky;top:0;z-index:10;flex-wrap:wrap;
+}
+.search-box{
+  position:relative;flex:1;min-width:180px;max-width:320px;
+}
+.search-box input{
+  width:100%;background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--r);color:var(--ink);font-family:var(--mono);
+  font-size:11px;padding:8px 12px 8px 32px;outline:none;
+  transition:border-color .15s;
+}
+.search-box input:focus{border-color:var(--accent)}
+.search-box input::placeholder{color:var(--ink3)}
+.search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--ink3);font-size:12px}
+select.fsel{
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--r);color:var(--ink);font-family:var(--mono);
+  font-size:11px;padding:8px 10px;outline:none;cursor:pointer;
+  transition:border-color .15s;
+}
+select.fsel:focus{border-color:var(--accent)}
+.vt{display:flex;border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.vt button{
+  background:transparent;border:none;color:var(--ink3);
+  padding:8px 12px;cursor:pointer;font-size:12px;transition:all .15s;
+  font-family:var(--sans);font-weight:600;
+}
+.vt button.on{background:var(--ink);color:#fff}
+.vt button:hover:not(.on){background:var(--surface2);color:var(--ink)}
+.rc{font-family:var(--mono);font-size:10px;color:var(--ink3);margin-left:auto}
+
+/* ── Table ── */
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead{position:sticky;top:0;z-index:5}
+th{
+  background:var(--surface2);border-bottom:1px solid var(--border);
+  padding:10px 14px;text-align:left;
+  font-family:var(--mono);font-size:9px;letter-spacing:.1em;
+  color:var(--ink3);text-transform:uppercase;white-space:nowrap;
+  cursor:pointer;user-select:none;
+}
+th:hover{color:var(--ink2)}
+td{padding:10px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:hover td{background:var(--surface2)}
+.td-img img,.td-img .ni{
+  width:38px;height:38px;border-radius:7px;
+  object-fit:cover;background:var(--surface3);
+  border:1px solid var(--border);display:block;
+}
+.td-img .ni{display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--ink3)}
+.td-name{font-weight:600;font-size:12px;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.td-src{font-size:10px;color:var(--ink3);margin-top:2px;font-family:var(--mono)}
+.td-sku{font-family:var(--mono);font-size:10px;color:var(--ink2)}
+.td-price{font-family:var(--mono);font-weight:600;color:var(--green)}
+.td-price.z{color:var(--red)}
+.td-cat{font-size:11px;color:var(--ink2);max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ── Badges ── */
+.badge{
+  display:inline-flex;align-items:center;gap:4px;
+  font-family:var(--mono);font-size:9px;font-weight:500;
+  padding:3px 8px;border-radius:20px;white-space:nowrap;
+}
+.b-green{background:var(--green-bg);color:var(--green);border:1px solid #bbf7d0}
+.b-red{background:var(--red-bg);color:var(--red);border:1px solid #fecaca}
+.b-amber{background:var(--amber-bg);color:var(--amber);border:1px solid #fde68a}
+.b-blue{background:var(--accent-bg);color:var(--accent);border:1px solid #bfdbfe}
+.b-gray{background:var(--surface2);color:var(--ink3);border:1px solid var(--border)}
+
+/* ── Grid ── */
+.gw{padding:20px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;align-content:start}
+.pcard{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:14px;overflow:hidden;cursor:pointer;
+  transition:all .2s;
+}
+.pcard:hover{border-color:var(--accent);box-shadow:0 6px 24px rgba(26,86,219,0.1);transform:translateY(-2px)}
+.pcard img,.pcard .pci{width:100%;aspect-ratio:1;object-fit:cover;background:var(--surface2);display:block}
+.pci{display:flex;align-items:center;justify-content:center;font-size:44px;color:var(--ink3)}
+.pcb{padding:12px}
+.pc-src{font-family:var(--mono);font-size:8px;color:var(--ink3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:3px}
+.pc-name{font-size:12px;font-weight:700;line-height:1.3;margin-bottom:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pc-foot{display:flex;align-items:center;justify-content:space-between;margin-top:8px}
+.pc-price{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--green)}
+.pc-price.z{color:var(--red)}
+
+/* ── Modal ── */
+.mover{
+  position:fixed;inset:0;background:rgba(26,25,23,0.6);
+  backdrop-filter:blur(8px);z-index:500;
+  display:flex;align-items:center;justify-content:center;padding:20px;
+  opacity:0;pointer-events:none;transition:opacity .2s;
+}
+.mover.open{opacity:1;pointer-events:all}
+.modal{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:20px;width:100%;max-width:840px;
+  max-height:90vh;overflow:hidden;display:flex;flex-direction:column;
+  transform:translateY(16px) scale(0.98);transition:transform .2s;
+  box-shadow:0 24px 80px rgba(0,0,0,0.2);
+}
+.mover.open .modal{transform:none}
+.mh{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:20px 24px;border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.mh-title{font-size:16px;font-weight:700;letter-spacing:-.3px}
+.mclose{
+  background:var(--surface2);border:1px solid var(--border);
+  color:var(--ink2);border-radius:8px;width:32px;height:32px;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;font-size:16px;transition:all .15s;
+}
+.mclose:hover{background:var(--red-bg);color:var(--red);border-color:#fecaca}
+.mbody{overflow-y:auto;padding:24px;flex:1}
+
+/* ── Detail ── */
+.dg{display:grid;grid-template-columns:220px 1fr;gap:24px;margin-bottom:24px}
+.dimgs img,.dimgs .dip{
+  width:100%;aspect-ratio:1;object-fit:cover;
+  border-radius:12px;border:1px solid var(--border);
+  background:var(--surface2);
+}
+.dip{display:flex;align-items:center;justify-content:center;font-size:60px;color:var(--ink3)}
+.dthumbs{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.dthumb{
+  width:48px;height:48px;object-fit:cover;
+  border-radius:8px;border:2px solid var(--border);
+  cursor:pointer;transition:border-color .15s;
+}
+.dthumb:hover,.dthumb.sel{border-color:var(--accent)}
+.dname{font-size:20px;font-weight:700;letter-spacing:-.4px;margin-bottom:10px;line-height:1.2}
+.dbadges{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.dprice{font-family:var(--mono);font-size:30px;font-weight:600;color:var(--green);letter-spacing:-1px;margin-bottom:4px}
+.dcmp{font-family:var(--mono);font-size:13px;color:var(--ink3);text-decoration:line-through;margin-bottom:14px}
+.frow{display:flex;gap:12px;border-bottom:1px solid var(--border);padding:8px 0}
+.frow:last-child{border:none}
+.fl{font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--ink3);text-transform:uppercase;min-width:100px;padding-top:1px}
+.fv{font-size:12px;color:var(--ink);flex:1;word-break:break-all}
+
+/* ── Tabs ── */
+.tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:20px}
+.tab{
+  background:transparent;border:none;border-bottom:2px solid transparent;
+  color:var(--ink3);font-family:var(--sans);font-size:12px;font-weight:700;
+  padding:10px 16px;cursor:pointer;transition:all .15s;margin-bottom:-1px;
+}
+.tab.on{color:var(--accent);border-bottom-color:var(--accent)}
+.tab:hover:not(.on){color:var(--ink2)}
+.tabp{display:none}
+.tabp.on{display:block}
+
+/* ── Code ── */
+.codeblock{
+  background:var(--ink);color:#e2e8f0;
+  border-radius:12px;padding:18px;
+  font-family:var(--mono);font-size:11px;line-height:1.7;
+  overflow:auto;max-height:320px;white-space:pre-wrap;
+  word-break:break-word;position:relative;
+}
+.cpbtn{
+  position:absolute;top:12px;right:12px;
+  background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);
+  color:rgba(255,255,255,0.6);border-radius:6px;padding:4px 10px;
+  font-size:10px;font-family:var(--mono);cursor:pointer;transition:all .15s;
+}
+.cpbtn:hover{background:rgba(255,255,255,0.2);color:#fff}
+
+/* ── Validation ── */
+.vrow{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border);font-size:12px}
+.vrow:last-child{border:none}
+.vicon{font-size:14px;flex-shrink:0;margin-top:1px}
+.vfield{font-family:var(--mono);font-size:9px;color:var(--ink3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:2px}
+.vp{color:var(--green)}.vw{color:var(--amber)}.vf{color:var(--red)}
+.allpass{text-align:center;padding:30px;color:var(--green);font-weight:700;font-size:14px}
+
+/* ── Full validation view ── */
+.valcard{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:14px;padding:20px;margin-bottom:16px;
+}
+.vcTitle{font-size:14px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.ilist{display:flex;flex-direction:column;gap:8px}
+.iitem{
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:8px;padding:10px 14px;font-size:11px;
+  display:flex;gap:10px;align-items:flex-start;
+}
+.iitem .in{color:var(--ink);font-weight:600}
+.iitem .im{color:var(--ink3);font-family:var(--mono);font-size:10px;margin-top:2px}
+
+/* ── CSV preview ── */
+.csvwrap{overflow-x:auto}
+.csvtbl{border-collapse:collapse;font-size:10px;font-family:var(--mono)}
+.csvtbl th{background:var(--surface2);padding:8px 10px;color:var(--ink3);font-size:8px;white-space:nowrap;border:1px solid var(--border)}
+.csvtbl td{padding:6px 10px;border:1px solid var(--border);max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink2);font-size:10px}
+
+/* ── Footer ── */
+.footer{
+  border-top:1px solid var(--border);padding:16px 32px;
+  font-family:var(--mono);font-size:10px;color:var(--ink3);
+  display:flex;gap:16px;align-items:center;
+  background:var(--surface);
+}
+.footer span{display:flex;align-items:center;gap:5px}
+
+.hidden{display:none!important}
+.btn{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:9px 16px;border-radius:var(--r);border:none;
+  font-family:var(--sans);font-size:12px;font-weight:700;cursor:pointer;transition:all .15s;
+}
+.btn-dark{background:var(--ink);color:#fff}
+.btn-dark:hover{background:#333}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--ink2)}
+.btn-outline:hover{background:var(--surface2);color:var(--ink)}
+
+@keyframes fade-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.fade-in{animation:fade-in .3s ease forwards}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-logo">
+    <span class="logo-dot"></span>
+    Product Import Dashboard
+  </div>
+  <div class="topbar-right">
+    <span class="tb-badge live">● Live Data</span>
+    <span class="tb-badge" id="hdr-count">Loading…</span>
+    <span class="tb-badge">BigCommerce Ready</span>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="s-section">
+      <div class="s-label">Views</div>
+      <div class="s-item active" onclick="sv('products')" id="sv-products">📦 All Products <span class="s-count" id="sc-all">0</span></div>
+      <div class="s-item" onclick="sv('validation')" id="sv-validation">✅ Validation <span class="s-count" id="sc-issues">—</span></div>
+      <div class="s-item" onclick="sv('csv')" id="sv-csv">📄 BC CSV Preview</div>
+      <div class="s-item" onclick="sv('api')" id="sv-api">⚡ BC API Payloads</div>
+    </div>
+    <div class="s-section">
+      <div class="s-label">Sources</div>
+      <div class="s-item active" onclick="filterSrc('all')" id="src-all">🌐 All Sources <span class="s-count" id="sc-src-all">0</span></div>
+      <div class="s-item" onclick="filterSrc('HDEW Cameras')" id="src-hdew">📷 HDEW Cameras <span class="s-count" id="sc-hdew">0</span></div>
+      <div class="s-item" onclick="filterSrc('UK Flooring Direct')" id="src-ukfd">🪵 UK Flooring Direct <span class="s-count" id="sc-ukfd">0</span></div>
+    </div>
+    <div class="s-section">
+      <div class="s-label">Stock</div>
+      <div class="s-item active" onclick="filterStock('all')" id="stk-all">🔘 All <span class="s-count" id="sc-st-all">0</span></div>
+      <div class="s-item" onclick="filterStock('In Stock')" id="stk-in">🟢 In Stock <span class="s-count" id="sc-st-in">0</span></div>
+      <div class="s-item" onclick="filterStock('Out of Stock')" id="stk-out">🔴 Out of Stock <span class="s-count" id="sc-st-out">0</span></div>
+      <div class="s-item" onclick="filterStock('Available (Backorder)')" id="stk-back">🟡 Backorder <span class="s-count" id="sc-st-back">0</span></div>
+    </div>
+  </nav>
+
+  <!-- Main content -->
+  <div class="content" id="main-content">
+
+    <!-- Products view -->
+    <div id="view-products">
+      <div class="stats-row" id="stats-row"></div>
+      <div class="toolbar">
+        <div class="search-box">
+          <span class="search-icon">⌕</span>
+          <input type="text" placeholder="Search name, SKU, brand…" id="srch" oninput="applyF()">
+        </div>
+        <select class="fsel" id="cat-f" onchange="applyF()"><option value="">All Categories</option></select>
+        <select class="fsel" id="sort-f" onchange="applyF()">
+          <option value="name">Name A→Z</option>
+          <option value="price-asc">Price ↑</option>
+          <option value="price-desc">Price ↓</option>
+          <option value="stock">Stock</option>
+        </select>
+        <div class="vt">
+          <button class="on" id="vtbl" onclick="setMode('table')">☰ Table</button>
+          <button id="vgrd" onclick="setMode('grid')">⊞ Grid</button>
+        </div>
+        <span class="rc" id="rc"></span>
+      </div>
+      <!-- Table -->
+      <div class="tw" id="tw">
+        <table>
+          <thead><tr>
+            <th style="width:48px"></th>
+            <th onclick="sortBy('name')">Product Name ↕</th>
+            <th onclick="sortBy('sku')">SKU</th>
+            <th onclick="sortBy('price')">Price ↕</th>
+            <th>Status</th>
+            <th>Category</th>
+            <th>Brand</th>
+            <th>Inv. Qty</th>
+            <th>Actions</th>
+          </tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <!-- Grid -->
+      <div class="gw hidden" id="gw"></div>
+    </div>
+
+    <!-- Validation view -->
+    <div id="view-validation" class="hidden" style="padding:24px"></div>
+
+    <!-- CSV view -->
+    <div id="view-csv" class="hidden" style="padding:24px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+        <h2 style="font-size:16px;font-weight:700">BigCommerce CSV Import Preview</h2>
+        <span style="font-size:11px;font-family:var(--mono);color:var(--ink3)">First 20 rows · Exact BC column format</span>
+        <button class="btn btn-dark" style="margin-left:auto" onclick="dlCSV()">⬇ Download CSV</button>
+      </div>
+      <div class="csvwrap"><table class="csvtbl" id="csvtbl"></table></div>
+    </div>
+
+    <!-- API view -->
+    <div id="view-api" class="hidden" style="padding:24px">
+      <div style="margin-bottom:16px">
+        <h2 style="font-size:16px;font-weight:700;margin-bottom:6px">BigCommerce API Payload</h2>
+        <p style="font-size:12px;color:var(--ink2);font-family:var(--mono)">POST https://api.bigcommerce.com/stores/{hash}/v3/catalog/products</p>
+      </div>
+      <div id="api-btns" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px"></div>
+      <div style="position:relative"><div class="codeblock" id="api-block"></div><button class="cpbtn" onclick="cpAPI()">Copy JSON</button></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="mover" id="mover" onclick="closeMif(event)">
+  <div class="modal" id="modal">
+    <div class="mh">
+      <div class="mh-title" id="m-title">Product Detail</div>
+      <div class="mclose" onclick="closeM()">✕</div>
+    </div>
+    <div class="mbody" id="m-body"></div>
+  </div>
+</div>
+
+<footer class="footer">
+  <span>📦 BigCommerce Product Import Dashboard</span>
+  <span>· Data scraped from hdewcameras.co.uk & ukflooringdirect.co.uk</span>
+  <span style="margin-left:auto">Built with Python scraper pipeline</span>
+</footer>
+
+<script>
+// ─── EMBEDDED PRODUCT DATA ───────────────────────────────────────────────────
+const PRODUCTS = [
+  // ── HDEW Cameras ──────────────────────────────────────────────────────────
+  {Site:"HDEW Cameras",Name:"Canon EOS R6 Mark II Body",SKU:"CAN-EOS-R6M2",Category:"Mirrorless Cameras","Vendor / Brand":"Canon","Price (GBP)":"2699.00","Compare At Price":"2999.00","Stock Status":"In Stock","Inventory Qty":"8","Main Image URL":"https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=500&h=500&fit=crop|https://images.unsplash.com/photo-1502920917128-1aa500764cbd?w=500&h=500&fit=crop",Tags:"canon,mirrorless,full-frame,r-system,professional",Description:"Full-frame mirrorless camera with 24.2MP BSI CMOS sensor. Features advanced subject detection AF, 40fps burst, and 6K RAW video output. Dual card slots and weather-sealed body.","Product URL":"https://hdewcameras.co.uk/products/canon-eos-r6-ii-body","Product ID":"hd001"},
+  {Site:"HDEW Cameras",Name:"Canon EOS R7 Body",SKU:"CAN-EOS-R7",Category:"Mirrorless Cameras","Vendor / Brand":"Canon","Price (GBP)":"899.00","Compare At Price":"1049.00","Stock Status":"In Stock","Inventory Qty":"14","Main Image URL":"https://images.unsplash.com/photo-1617005082133-548c4dd27f35?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1617005082133-548c4dd27f35?w=500&h=500&fit=crop",Tags:"canon,mirrorless,aps-c,r7",Description:"32.5MP APS-C mirrorless with Dual Pixel CMOS AF II, 15fps mechanical and 30fps electronic shutter. Compact body with 8-stop IBIS stabilisation.","Product URL":"https://hdewcameras.co.uk/products/canon-eos-r7-body","Product ID":"hd002"},
+  {Site:"HDEW Cameras",Name:"Sony Alpha A7 IV Body",SKU:"SNY-A7IV",Category:"Mirrorless Cameras","Vendor / Brand":"Sony","Price (GBP)":"2299.00","Compare At Price":"","Stock Status":"In Stock","Inventory Qty":"6","Main Image URL":"https://images.unsplash.com/photo-1589652717521-10c0d092dea9?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1589652717521-10c0d092dea9?w=500&h=500&fit=crop",Tags:"sony,mirrorless,full-frame,a7,alpha",Description:"33MP full-frame BSI CMOS sensor with Sony's latest BIONZ XR processor. 10fps continuous shooting, 4K 60p video and 5-axis optical in-body image stabilisation.","Product URL":"https://hdewcameras.co.uk/products/sony-alpha-a7-iv","Product ID":"hd003"},
+  {Site:"HDEW Cameras",Name:"Nikon Z8 Body",SKU:"NIK-Z8-BODY",Category:"Mirrorless Cameras","Vendor / Brand":"Nikon","Price (GBP)":"3399.00","Compare At Price":"3699.00","Stock Status":"In Stock","Inventory Qty":"4","Main Image URL":"https://images.unsplash.com/photo-1606216794074-735e91aa2c92?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1606216794074-735e91aa2c92?w=500&h=500&fit=crop",Tags:"nikon,mirrorless,45mp,8k,professional",Description:"45.7MP BSI-CMOS sensor professional mirrorless. Shoots 8K RAW video internally and 20fps full-resolution stills. Advanced subject detection with real-time tracking.","Product URL":"https://hdewcameras.co.uk/products/nikon-z8-body","Product ID":"hd004"},
+  {Site:"HDEW Cameras",Name:"Fujifilm X-T5 Body Black",SKU:"FUJ-XT5-BK",Category:"Mirrorless Cameras","Vendor / Brand":"Fujifilm","Price (GBP)":"1599.00","Compare At Price":"1799.00","Stock Status":"In Stock","Inventory Qty":"9","Main Image URL":"https://images.unsplash.com/photo-1504898770365-14faca6a7320?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1504898770365-14faca6a7320?w=500&h=500&fit=crop",Tags:"fujifilm,mirrorless,aps-c,40mp,x-trans",Description:"40.2MP X-Trans BSI CMOS 5 HR sensor in a compact, retro-styled body. 7-stop IBIS, 6.2K video and Fujifilm's acclaimed Film Simulations.","Product URL":"https://hdewcameras.co.uk/products/fujifilm-x-t5-black","Product ID":"hd005"},
+  {Site:"HDEW Cameras",Name:"Canon EF 50mm f/1.4 USM Lens",SKU:"CAN-EF50-14",Category:"Camera Lens","Vendor / Brand":"Canon","Price (GBP)":"299.00","Compare At Price":"349.00","Stock Status":"In Stock","Inventory Qty":"23","Main Image URL":"https://images.unsplash.com/photo-1543163521-1bf539c55dd2?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1543163521-1bf539c55dd2?w=500&h=500&fit=crop",Tags:"canon,lens,50mm,prime,ef-mount",Description:"Classic Canon EF 50mm portrait lens with f/1.4 maximum aperture and ring-type USM for fast, near-silent autofocus. 7-blade circular aperture for beautiful bokeh.","Product URL":"https://hdewcameras.co.uk/products/canon-ef-50mm-f14","Product ID":"hd006"},
+  {Site:"HDEW Cameras",Name:"Sigma 85mm f/1.4 DG DN Art Sony E",SKU:"SIG-85-DG-DN-SE",Category:"Camera Lens","Vendor / Brand":"Sigma","Price (GBP)":"849.00","Compare At Price":"","Stock Status":"In Stock","Inventory Qty":"7","Main Image URL":"https://images.unsplash.com/photo-1606216794074-735e91aa2c92?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1606216794074-735e91aa2c92?w=500&h=500&fit=crop",Tags:"sigma,lens,85mm,prime,art,sony-e",Description:"Art-series 85mm portrait lens designed for full-frame mirrorless. Exceptional resolution to the corners, 11-blade aperture and HLA linear AF motor for fast, precise focus.","Product URL":"https://hdewcameras.co.uk/products/sigma-85-dg-dn","Product ID":"hd007"},
+  {Site:"HDEW Cameras",Name:"GoPro Hero 12 Black",SKU:"GPRO-H12-BK",Category:"Action Cameras","Vendor / Brand":"GoPro","Price (GBP)":"349.00","Compare At Price":"399.00","Stock Status":"Out of Stock","Inventory Qty":"0","Main Image URL":"https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=500&h=500&fit=crop",Tags:"gopro,action,waterproof,5.3k,stabilisation",Description:"HyperSmooth 6.0 stabilisation and 5.3K60 video. Waterproof to 10m with new Enduro battery for 38% more battery life in cold conditions.","Product URL":"https://hdewcameras.co.uk/products/gopro-hero-12-black","Product ID":"hd008"},
+  {Site:"HDEW Cameras",Name:"DJI Mavic 3 Pro Drone",SKU:"DJI-MAV3-PRO",Category:"Drones","Vendor / Brand":"DJI","Price (GBP)":"1999.00","Compare At Price":"2199.00","Stock Status":"In Stock","Inventory Qty":"3","Main Image URL":"https://images.unsplash.com/photo-1473968512647-3e447244af8f?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1473968512647-3e447244af8f?w=500&h=500&fit=crop",Tags:"dji,drone,4k,hasselblad,aerial",Description:"Triple-camera aerial system with Hasselblad L-Format main camera, 70mm and 166mm tele cameras. 43-minute max flight time with obstacle sensing on all sides.","Product URL":"https://hdewcameras.co.uk/products/dji-mavic-3-pro","Product ID":"hd009"},
+  {Site:"HDEW Cameras",Name:"Sony FX3 Cinema Line Camera",SKU:"SNY-FX3",Category:"Video Cameras","Vendor / Brand":"Sony","Price (GBP)":"3899.00","Compare At Price":"","Stock Status":"In Stock","Inventory Qty":"2","Main Image URL":"https://images.unsplash.com/photo-1598300042247-d088f8ab3a91?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1598300042247-d088f8ab3a91?w=500&h=500&fit=crop",Tags:"sony,cinema,video,4k,s-log3",Description:"Full-frame Cinema Line camera with 12.1MP sensor optimised for video. 4K 120fps, S-Cinetone colour science and built-in fan cooling for extended recording sessions.","Product URL":"https://hdewcameras.co.uk/products/sony-fx3","Product ID":"hd010"},
+  {Site:"HDEW Cameras",Name:"Manfrotto MT190XPRO4 Tripod",SKU:"MFR-MT190XPRO4",Category:"Camera Tripod","Vendor / Brand":"Manfrotto","Price (GBP)":"229.00","Compare At Price":"279.00","Stock Status":"In Stock","Inventory Qty":"18","Main Image URL":"https://images.unsplash.com/photo-1502920917128-1aa500764cbd?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1502920917128-1aa500764cbd?w=500&h=500&fit=crop",Tags:"manfrotto,tripod,aluminium,190,photo",Description:"4-section aluminium tripod with 90° column mechanism for macro and overhead shots. Maximum height 185cm, load capacity 7kg, foldable to 67cm.","Product URL":"https://hdewcameras.co.uk/products/manfrotto-190xpro4","Product ID":"hd011"},
+  {Site:"HDEW Cameras",Name:"SanDisk 128GB Extreme Pro CFexpress",SKU:"SDK-128-CFEX",Category:"Memory Card","Vendor / Brand":"SanDisk","Price (GBP)":"129.00","Compare At Price":"159.00","Stock Status":"Available (Backorder)","Inventory Qty":"0","Main Image URL":"https://images.unsplash.com/photo-1518770660439-4636190af475?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1518770660439-4636190af475?w=500&h=500&fit=crop",Tags:"sandisk,memory,cfexpress,128gb,fast",Description:"CFexpress Type B card with 1700MB/s read and 1200MB/s write speeds. Ideal for 8K RAW video recording and high-speed burst photography.","Product URL":"https://hdewcameras.co.uk/products/sandisk-128gb-cfexpress","Product ID":"hd012"},
+  // ── UK Flooring Direct ─────────────────────────────────────────────────────
+  {Site:"UK Flooring Direct",Name:"Karndean Van Gogh Blond Oak LVT",SKU:"KRD-VG-BLOND-OAK",Category:"Luxury Vinyl Tile","Vendor / Brand":"Karndean","Price (GBP)":"44.99","Compare At Price":"52.99","Stock Status":"In Stock","Inventory Qty":"520","Main Image URL":"https://images.unsplash.com/photo-1562663474-6cbb3eaa4d14?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1562663474-6cbb3eaa4d14?w=500&h=500&fit=crop|https://images.unsplash.com/photo-1581858726788-75bc0f6a952d?w=500&h=500&fit=crop",Tags:"karndean,vinyl,luxury,waterproof,oak,van-gogh","Price Per m2 Tag":"£44.99 per m2",Description:"Premium luxury vinyl tile in authentic Blond Oak finish. 2.5mm commercial-grade wear layer. Fully waterproof, scratch resistant and compatible with underfloor heating.","Product URL":"https://www.ukflooringdirect.co.uk/products/karndean-blond-oak","Product ID":"uk001"},
+  {Site:"UK Flooring Direct",Name:"Quick-Step Impressive Ultra Walnut",SKU:"QS-IMU-WAL-001",Category:"Laminate","Vendor / Brand":"Quick-Step","Price (GBP)":"32.99","Compare At Price":"39.99","Stock Status":"In Stock","Inventory Qty":"840","Main Image URL":"https://images.unsplash.com/photo-1581858726788-75bc0f6a952d?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1581858726788-75bc0f6a952d?w=500&h=500&fit=crop",Tags:"quick-step,laminate,walnut,waterproof,12mm","Price Per m2 Tag":"£32.99 per m2",Description:"12mm waterproof laminate with Hydroseal protection. Realistic walnut wood effect with 4-sided bevelled edges. 25-year domestic warranty. Click installation system.","Product URL":"https://www.ukflooringdirect.co.uk/products/quickstep-impressive-walnut","Product ID":"uk002"},
+  {Site:"UK Flooring Direct",Name:"Kahrs Engineered Oak Natural Oiled 14mm",SKU:"KAH-ENG-OAK-NAT14",Category:"Engineered Wood","Vendor / Brand":"Kahrs","Price (GBP)":"62.99","Compare At Price":"","Stock Status":"In Stock","Inventory Qty":"310","Main Image URL":"https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=500&h=500&fit=crop",Tags:"kahrs,engineered,wood,oak,natural,oiled,14mm","Price Per m2 Tag":"£62.99 per m2",Description:"Swedish-engineered oak flooring with natural oil finish. 14mm total thickness, 3.5mm solid oak top layer. Warmth underfoot, suitable for underfloor heating systems.","Product URL":"https://www.ukflooringdirect.co.uk/products/kahrs-oak-natural-oiled","Product ID":"uk003"},
+  {Site:"UK Flooring Direct",Name:"Amtico Spacia Stone White Marble Vinyl",SKU:"AMT-SP-WHT-MRB",Category:"Luxury Vinyl Tile","Vendor / Brand":"Amtico","Price (GBP)":"54.99","Compare At Price":"64.99","Stock Status":"In Stock","Inventory Qty":"245","Main Image URL":"https://images.unsplash.com/photo-1600607686527-6fb886090705?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1600607686527-6fb886090705?w=500&h=500&fit=crop",Tags:"amtico,vinyl,marble,stone-effect,luxury,white","Price Per m2 Tag":"£54.99 per m2",Description:"White marble-effect luxury vinyl with 2.5mm commercial wear layer. Suitable for all rooms including bathrooms and kitchens. Lifetime residential warranty.","Product URL":"https://www.ukflooringdirect.co.uk/products/amtico-white-marble","Product ID":"uk004"},
+  {Site:"UK Flooring Direct",Name:"Solid Oak Herringbone 18mm Unfinished",SKU:"SOL-OAK-HBN-18-UNF",Category:"Solid Wood","Vendor / Brand":"UK Flooring Direct","Price (GBP)":"74.99","Compare At Price":"89.99","Stock Status":"In Stock","Inventory Qty":"175","Main Image URL":"https://images.unsplash.com/photo-1585771724684-38269d6639fd?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1585771724684-38269d6639fd?w=500&h=500&fit=crop",Tags:"solid-wood,oak,herringbone,18mm,unfinished,real-wood","Price Per m2 Tag":"£74.99 per m2",Description:"Solid oak herringbone parquet flooring, unfinished. 18mm thickness, 70x350mm individual blocks. Sand and finish on-site to your chosen colour. FSC certified.","Product URL":"https://www.ukflooringdirect.co.uk/products/solid-oak-herringbone-18-unfinished","Product ID":"uk005"},
+  {Site:"UK Flooring Direct",Name:"Wicanders Artcomfort Cork Natural 10.5mm",SKU:"WIC-CORK-NAT-10",Category:"Cork","Vendor / Brand":"Wicanders","Price (GBP)":"24.99","Compare At Price":"","Stock Status":"In Stock","Inventory Qty":"420","Main Image URL":"https://images.unsplash.com/photo-1562663474-6cbb3eaa4d14?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1562663474-6cbb3eaa4d14?w=500&h=500&fit=crop",Tags:"cork,natural,wicanders,sustainable,10mm","Price Per m2 Tag":"£24.99 per m2",Description:"Sustainable natural cork floating floor with pre-attached underlay. 10.5mm total thickness. Naturally warm underfoot, hypoallergenic and sound-absorbing.","Product URL":"https://www.ukflooringdirect.co.uk/products/wicanders-cork-natural","Product ID":"uk006"},
+  {Site:"UK Flooring Direct",Name:"Polyflor Camaro Loc Grey Slate Vinyl",SKU:"PLF-CAM-GREY-SLT",Category:"Luxury Vinyl Tile","Vendor / Brand":"Polyflor","Price (GBP)":"28.99","Compare At Price":"33.99","Stock Status":"Out of Stock","Inventory Qty":"0","Main Image URL":"https://images.unsplash.com/photo-1600607686527-6fb886090705?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1600607686527-6fb886090705?w=500&h=500&fit=crop",Tags:"polyflor,vinyl,grey,slate,click,camaro","Price Per m2 Tag":"£28.99 per m2",Description:"Grey slate effect luxury vinyl with PUR reinforced surface and Camaro Loc click system. 2mm commercial wear layer, suitable for heavy domestic and light commercial use.","Product URL":"https://www.ukflooringdirect.co.uk/products/polyflor-grey-slate","Product ID":"uk007"},
+  {Site:"UK Flooring Direct",Name:"Elka 12mm Herringbone Smoked Oak Laminate",SKU:"ELK-12-HBN-SMK",Category:"Laminate","Vendor / Brand":"Elka","Price (GBP)":"38.99","Compare At Price":"46.99","Stock Status":"In Stock","Inventory Qty":"580","Main Image URL":"https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=500&h=500&fit=crop",Tags:"elka,laminate,herringbone,smoked-oak,12mm","Price Per m2 Tag":"£38.99 per m2",Description:"12mm herringbone pattern laminate with authentic smoked oak appearance. AquaPro waterproof core and Uniclic click system. AC5 commercial grade wear layer.","Product URL":"https://www.ukflooringdirect.co.uk/products/elka-herringbone-smoked-oak","Product ID":"uk008"},
+  {Site:"UK Flooring Direct",Name:"Ted Todd Classic Naturals Elm Strip",SKU:"TTD-CLS-ELM-STR",Category:"Engineered Wood","Vendor / Brand":"Ted Todd","Price (GBP)":"89.99","Compare At Price":"105.99","Stock Status":"Available (Backorder)","Inventory Qty":"0","Main Image URL":"https://images.unsplash.com/photo-1585771724684-38269d6639fd?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1585771724684-38269d6639fd?w=500&h=500&fit=crop",Tags:"ted-todd,engineered,elm,strip,hardwood,premium","Price Per m2 Tag":"£89.99 per m2",Description:"Premium engineered elm with character-grade graining. 14/3mm construction with lacquered finish. Made in the UK. Suitable for underfloor heating. 25-year structural warranty.","Product URL":"https://www.ukflooringdirect.co.uk/products/ted-todd-elm-strip","Product ID":"uk009"},
+  {Site:"UK Flooring Direct",Name:"Moduleo LayRed Dryback Cascade Oak",SKU:"MOD-LRD-CAS-OAK",Category:"Luxury Vinyl Tile","Vendor / Brand":"Moduleo","Price (GBP)":"35.99","Compare At Price":"","Stock Status":"In Stock","Inventory Qty":"640","Main Image URL":"https://images.unsplash.com/photo-1562663474-6cbb3eaa4d14?w=500&h=500&fit=crop","All Image URLs":"https://images.unsplash.com/photo-1562663474-6cbb3eaa4d14?w=500&h=500&fit=crop",Tags:"moduleo,vinyl,layred,cascade-oak,dryback","Price Per m2 Tag":"£35.99 per m2",Description:"Premium dryback luxury vinyl plank with embossed oak texture. 0.55mm wear layer for commercial durability. Easy dry-back adhesive installation. Fully waterproof.","Product URL":"https://www.ukflooringdirect.co.uk/products/moduleo-cascade-oak","Product ID":"uk010"},
+];
+
+// ─── State ─────────────────────────────────────────────────────────────────
+let filtered = [...PRODUCTS];
+let srcFilter = 'all', stkFilter = 'all', dispMode = 'table', curView = 'products';
+
+// ─── Boot ──────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  updateSideCounts();
+  buildCatFilter();
+  applyF();
+  buildCSVPreview();
+  buildAPISelector();
+  buildValidation();
+  document.getElementById('hdr-count').textContent = PRODUCTS.length + ' Products Loaded';
+});
+
+function updateSideCounts(){
+  const t = PRODUCTS.length;
+  const hdew = PRODUCTS.filter(p=>p.Site==='HDEW Cameras').length;
+  const ukfd = PRODUCTS.filter(p=>p.Site==='UK Flooring Direct').length;
+  const cts = {all:t,'In Stock':0,'Out of Stock':0,'Available (Backorder)':0};
+  PRODUCTS.forEach(p=>{ const s=p['Stock Status']; if(cts[s]!==undefined) cts[s]++; });
+  ['sc-all','sc-src-all'].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent=t; });
+  const h=document.getElementById('sc-hdew'); if(h) h.textContent=hdew;
+  const u=document.getElementById('sc-ukfd'); if(u) u.textContent=ukfd;
+  document.getElementById('sc-st-all').textContent=t;
+  document.getElementById('sc-st-in').textContent=cts['In Stock'];
+  document.getElementById('sc-st-out').textContent=cts['Out of Stock'];
+  document.getElementById('sc-st-back').textContent=cts['Available (Backorder)'];
+  document.getElementById('sc-issues').textContent='—';
+}
+
+function buildCatFilter(){
+  const cats=[...new Set(PRODUCTS.map(p=>p.Category).filter(Boolean))].sort();
+  const s=document.getElementById('cat-f');
+  cats.forEach(c=>{ const o=document.createElement('option'); o.value=c; o.textContent=c; s.appendChild(o); });
+}
+
+// ─── Filters ───────────────────────────────────────────────────────────────
+function filterSrc(s){
+  srcFilter=s;
+  document.querySelectorAll('[id^="src-"]').forEach(el=>el.classList.remove('active'));
+  const el=document.getElementById(s==='all'?'src-all':'src-'+s.toLowerCase().replace(/\s+/g,'-').replace(/[^a-z-]/g,''));
+  if(el) el.classList.add('active'); else document.getElementById('src-all').classList.add('active');
+  applyF();
+}
+function filterStock(s){
+  stkFilter=s;
+  document.querySelectorAll('[id^="stk-"]').forEach(el=>el.classList.remove('active'));
+  const map={'all':'stk-all','In Stock':'stk-in','Out of Stock':'stk-out','Available (Backorder)':'stk-back'};
+  const el=document.getElementById(map[s]||'stk-all'); if(el) el.classList.add('active');
+  applyF();
+}
+function sortBy(f){ document.getElementById('sort-f').value=f; applyF(); }
+
+function applyF(){
+  const q=(document.getElementById('srch')||{value:''}).value.toLowerCase();
+  const cat=(document.getElementById('cat-f')||{value:''}).value;
+  const srt=(document.getElementById('sort-f')||{value:'name'}).value;
+  filtered=PRODUCTS.filter(p=>{
+    const n=(p.Name||'').toLowerCase(), sk=(p.SKU||'').toLowerCase(), br=(p['Vendor / Brand']||'').toLowerCase(), ds=(p.Description||'').toLowerCase();
+    if(q && !n.includes(q) && !sk.includes(q) && !br.includes(q) && !ds.includes(q)) return false;
+    if(cat && p.Category!==cat) return false;
+    if(stkFilter!=='all' && p['Stock Status']!==stkFilter) return false;
+    if(srcFilter!=='all' && p.Site!==srcFilter) return false;
+    return true;
+  });
+  filtered.sort((a,b)=>{
+    if(srt==='name') return (a.Name||'').localeCompare(b.Name||'');
+    if(srt==='price-asc') return parseFloat(a['Price (GBP)']||0)-parseFloat(b['Price (GBP)']||0);
+    if(srt==='price-desc') return parseFloat(b['Price (GBP)']||0)-parseFloat(a['Price (GBP)']||0);
+    if(srt==='stock') return (a['Stock Status']||'').localeCompare(b['Stock Status']||'');
+    return 0;
+  });
+  const rc=document.getElementById('rc'); if(rc) rc.textContent=filtered.length+' results';
+  renderStats();
+  if(dispMode==='table') renderTable(); else renderGrid();
+}
+
+function setMode(m){
+  dispMode=m;
+  document.getElementById('tw').classList.toggle('hidden',m!=='table');
+  document.getElementById('gw').classList.toggle('hidden',m!=='grid');
+  document.getElementById('vtbl').classList.toggle('on',m==='table');
+  document.getElementById('vgrd').classList.toggle('on',m==='grid');
+  if(m==='table') renderTable(); else renderGrid();
+}
+
+// ─── Stats ─────────────────────────────────────────────────────────────────
+function renderStats(){
+  const priced=filtered.filter(p=>parseFloat(p['Price (GBP)']||0)>0);
+  const avg=priced.length?priced.reduce((s,p)=>s+parseFloat(p['Price (GBP)']||0),0)/priced.length:0;
+  const inStk=filtered.filter(p=>p['Stock Status']==='In Stock').length;
+  const imgs=filtered.filter(p=>p['Main Image URL']).length;
+  const srcs=[...new Set(filtered.map(p=>p.Site).filter(Boolean))];
+  document.getElementById('stats-row').innerHTML=`
+    <div class="stat"><div class="stat-l">Total Products</div><div class="stat-v c-blue">${filtered.length}</div><div class="stat-s">of ${PRODUCTS.length} loaded</div></div>
+    <div class="stat"><div class="stat-l">Avg Price</div><div class="stat-v c-green">£${avg.toFixed(2)}</div><div class="stat-s">${priced.length} priced</div></div>
+    <div class="stat"><div class="stat-l">In Stock</div><div class="stat-v" style="color:${inStk>0?'var(--green)':'var(--red)'}">${inStk}</div><div class="stat-s">${filtered.length?Math.round(inStk/filtered.length*100):0}% available</div></div>
+    <div class="stat"><div class="stat-l">With Images</div><div class="stat-v c-blue">${imgs}</div><div class="stat-s">${filtered.length?Math.round(imgs/filtered.length*100):0}% coverage</div></div>
+    <div class="stat"><div class="stat-l">Data Sources</div><div class="stat-v c-blue">${srcs.length}</div><div class="stat-s">${srcs.map(s=>s.split(' ')[0]).join(' + ')}</div></div>`;
+}
+
+// ─── Badges ────────────────────────────────────────────────────────────────
+function sBadge(s){
+  const m={'In Stock':'<span class="badge b-green">● In Stock</span>','Out of Stock':'<span class="badge b-red">✕ Out of Stock</span>','Available (Backorder)':'<span class="badge b-amber">⏳ Backorder</span>'};
+  return m[s]||`<span class="badge b-gray">${eh(s||'Unknown')}</span>`;
+}
+
+// ─── Table ─────────────────────────────────────────────────────────────────
+function renderTable(){
+  const tb=document.getElementById('tbody');
+  if(!filtered.length){tb.innerHTML='<tr><td colspan="9" style="text-align:center;padding:60px;color:var(--ink3);font-size:14px">No products match your filters</td></tr>';return;}
+  tb.innerHTML=filtered.map((p,i)=>{
+    const pr=parseFloat(p['Price (GBP)']||0);
+    const img=p['Main Image URL'];
+    return`<tr style="cursor:pointer" onclick="openM(${i})">
+      <td class="td-img">${img?`<img src="${eh(img)}" onerror="this.parentNode.innerHTML='<div class=ni>📦</div>'">`:'<div class="ni">📦</div>'}</td>
+      <td><div class="td-name" title="${eh(p.Name||'')}">${eh(p.Name||'—')}</div><div class="td-src">${eh(p.Site||'')}</div></td>
+      <td class="td-sku">${eh(p.SKU||'—')}</td>
+      <td class="td-price${pr<=0?' z':''}">${pr>0?'£'+pr.toFixed(2):'N/A'}</td>
+      <td>${sBadge(p['Stock Status'])}</td>
+      <td class="td-cat">${eh(p.Category||'—')}</td>
+      <td class="td-cat">${eh(p['Vendor / Brand']||'—')}</td>
+      <td style="font-family:var(--mono);font-size:11px">${p['Inventory Qty']!==undefined&&p['Inventory Qty']!==''?p['Inventory Qty']:'-'}</td>
+      <td><div style="display:flex;gap:6px">
+        <button class="btn btn-outline" style="padding:5px 10px;font-size:11px" onclick="event.stopPropagation();openM(${i})">View</button>
+        <button class="btn btn-outline" style="padding:5px 10px;font-size:11px" onclick="event.stopPropagation();showAPI(${i})">⚡ BC</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+// ─── Grid ──────────────────────────────────────────────────────────────────
+function renderGrid(){
+  const gw=document.getElementById('gw');
+  if(!filtered.length){gw.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:60px;color:var(--ink3)">No products match</div>';return;}
+  gw.innerHTML=filtered.map((p,i)=>{
+    const pr=parseFloat(p['Price (GBP)']||0);
+    return`<div class="pcard fade-in" onclick="openM(${i})">
+      ${p['Main Image URL']?`<img src="${eh(p['Main Image URL'])}" onerror="this.outerHTML='<div class=pci>📦</div>'">`:'<div class="pci">📦</div>'}
+      <div class="pcb">
+        <div class="pc-src">${eh(p.Site||'')}</div>
+        <div class="pc-name">${eh(p.Name||'—')}</div>
+        <div style="font-size:10px;color:var(--ink3);margin-bottom:6px">${eh(p.Category||'')}</div>
+        <div class="pc-foot">
+          <div class="pc-price${pr<=0?' z':''}">${pr>0?'£'+pr.toFixed(2):'N/A'}</div>
+          ${sBadge(p['Stock Status'])}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ─── Modal ─────────────────────────────────────────────────────────────────
+function openM(i){
+  const p=filtered[i]; if(!p) return;
+  document.getElementById('m-title').textContent=(p.Name||'Product').substring(0,60);
+  const imgs=(p['All Image URLs']||'').split('|').map(u=>u.trim()).filter(Boolean);
+  const main=p['Main Image URL']||imgs[0]||'';
+  if(main&&!imgs.includes(main)) imgs.unshift(main);
+  const pr=parseFloat(p['Price (GBP)']||0), cmp=parseFloat(p['Compare At Price']||0);
+  const val=validate(p), payload=buildPayload(p), csvr=buildCSVRow(p);
+  document.getElementById('m-body').innerHTML=`
+    <div class="dg">
+      <div class="dimgs">
+        ${main?`<img id="dmi" src="${eh(main)}" onerror="this.style.display='none'">`:'<div class="dip">📦</div>'}
+        ${imgs.length>1?`<div class="dthumbs">${imgs.slice(0,5).map((u,j)=>`<img class="dthumb${j===0?' sel':''}" src="${eh(u)}" onclick="selectImg(this,'${eh(u)}')">`).join('')}</div>`:''}
+      </div>
+      <div>
+        <div class="dname">${eh(p.Name||'—')}</div>
+        <div class="dbadges">${sBadge(p['Stock Status'])}${p.Category?`<span class="badge b-blue">${eh(p.Category)}</span>`:''}${p.Site?`<span class="badge b-gray">${eh(p.Site)}</span>`:''}</div>
+        <div class="dprice">${pr>0?'£'+pr.toFixed(2):'No price set'}</div>
+        ${cmp>0?`<div class="dcmp">Was £${cmp.toFixed(2)}</div>`:''}
+        <div>
+          ${[['SKU',p.SKU||'—'],['Brand',p['Vendor / Brand']||'—'],['Category',p.Category||'—'],['Inventory',p['Inventory Qty']!==undefined&&p['Inventory Qty']!==''?p['Inventory Qty']+' units':'—'],['Tags',p.Tags||'—'],['Source URL',p['Product URL']?`<a href="${eh(p['Product URL'])}" target="_blank" style="color:var(--accent)">${p['Product URL'].substring(0,50)}…</a>`:'—']].map(([l,v])=>`<div class="frow"><div class="fl">${l}</div><div class="fv">${v}</div></div>`).join('')}
+        </div>
+      </div>
+    </div>
+    ${p.Description?`<div style="margin-bottom:20px"><div style="font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink3);margin-bottom:8px">Description</div><div style="font-size:12px;color:var(--ink2);line-height:1.7;background:var(--surface2);border-radius:10px;padding:14px;border:1px solid var(--border)">${eh(p.Description)}</div></div>`:''}
+    <div class="tabs">
+      <button class="tab on" onclick="switchTab(this,'tv')">✅ Validation</button>
+      <button class="tab" onclick="switchTab(this,'tapi')">⚡ API Payload</button>
+      <button class="tab" onclick="switchTab(this,'tcsv')">📄 CSV Row</button>
+    </div>
+    <div class="tabp on" id="tv">${renderVal(val)}</div>
+    <div class="tabp" id="tapi">
+      <div style="font-size:10px;font-family:var(--mono);color:var(--ink3);margin-bottom:10px">POST https://api.bigcommerce.com/stores/{store_hash}/v3/catalog/products</div>
+      <div style="position:relative"><div class="codeblock" id="modal-code">${eh(JSON.stringify(payload,null,2))}</div><button class="cpbtn" onclick="navigator.clipboard.writeText(document.getElementById('modal-code').textContent)">Copy</button></div>
+    </div>
+    <div class="tabp" id="tcsv">
+      <div style="font-size:10px;font-family:var(--mono);color:var(--ink3);margin-bottom:10px">BigCommerce CSV import row — key fields</div>
+      <div class="codeblock">${Object.entries(csvr).map(([k,v])=>`<span style="color:#93c5fd">${eh(k)}</span>: ${eh(String(v))}`).join('\n')}</div>
+    </div>`;
+  document.getElementById('mover').classList.add('open');
+}
+function selectImg(el,url){
+  document.querySelectorAll('.dthumb').forEach(t=>t.classList.remove('sel'));
+  el.classList.add('sel');
+  const mi=document.getElementById('dmi'); if(mi) mi.src=url;
+}
+function switchTab(btn,id){
+  btn.closest('.mbody').querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));
+  btn.closest('.mbody').querySelectorAll('.tabp').forEach(p=>p.classList.remove('on'));
+  btn.classList.add('on');
+  document.getElementById(id).classList.add('on');
+}
+function closeM(){ document.getElementById('mover').classList.remove('open'); }
+function closeMif(e){ if(e.target===document.getElementById('mover')) closeM(); }
+
+// ─── Validation ────────────────────────────────────────────────────────────
+function validate(p){
+  const n=(p.Name||'').trim(), pr=parseFloat(p['Price (GBP)']||0), sk=(p.SKU||'').trim();
+  return[
+    {f:'Name',pass:!!n,warn:false,msg:n?`✓ Present (${n.length}/250 chars)`:'✗ Missing — required by BigCommerce'},
+    {f:'Price',pass:pr>0,warn:false,msg:pr>0?`✓ £${pr.toFixed(2)}`:'✗ Zero or missing — BC requires price > 0'},
+    {f:'SKU',pass:true,warn:!sk,msg:sk?`✓ ${sk}`:'⚠ Missing — BC will auto-generate (risk of duplicates)'},
+    {f:'Description',pass:true,warn:!(p.Description||'').trim(),msg:(p.Description||'').trim()?`✓ ${(p.Description||'').length} chars`:'⚠ Empty — no description will be imported'},
+    {f:'Image URL',pass:true,warn:!(p['Main Image URL']||'').trim(),msg:(p['Main Image URL']||'').trim()?'✓ Image URL present':'⚠ No image — product imports without image'},
+    {f:'Category',pass:true,warn:!(p.Category||'').trim(),msg:(p.Category||'').trim()?`✓ ${p.Category}`:'⚠ No category → will import as Uncategorised'},
+    {f:'Stock Status',pass:true,warn:false,msg:`✓ ${p['Stock Status']||'Unknown'}`},
+    {f:'Brand',pass:true,warn:!(p['Vendor / Brand']||'').trim(),msg:(p['Vendor / Brand']||'').trim()?`✓ ${p['Vendor / Brand']}`:'⚠ No brand set'},
+  ];
+}
+function renderVal(checks){
+  const bad=checks.filter(c=>!c.pass||c.warn);
+  if(!bad.length) return'<div class="allpass">✅ All validation checks passed — ready to import into BigCommerce!</div>';
+  return checks.map(c=>`<div class="vrow"><div class="vicon">${!c.pass?'❌':c.warn?'⚠️':'✅'}</div><div><div class="vfield">${c.f}</div><div class="${!c.pass?'vf':c.warn?'vw':'vp'}">${eh(c.msg)}</div></div></div>`).join('');
+}
+
+// ─── BC Payload ────────────────────────────────────────────────────────────
+function buildPayload(p){
+  const imgs=(p['All Image URLs']||'').split('|').map(u=>u.trim()).filter(Boolean);
+  const main=p['Main Image URL']||imgs[0]||''; if(main&&!imgs.includes(main)) imgs.unshift(main);
+  const pr=parseFloat(p['Price (GBP)']||0), cmp=parseFloat(p['Compare At Price']||0), qty=parseInt(p['Inventory Qty']||0)||0;
+  const s=(p['Stock Status']||'').toLowerCase();
+  const out={
+    name:(p.Name||'Unnamed').substring(0,250),
+    type:'physical',sku:p.SKU||'',
+    description:`<p>${(p.Description||'').substring(0,2000)}</p>`,
+    price:pr>0?pr:0.01,
+    weight:0.5,
+    brand_name:p['Vendor / Brand']||'',
+    categories:[],
+    inventory_level:qty,
+    inventory_tracking:'product',
+    availability:s.includes('out')?'disabled':s.includes('back')?'preorder':'available',
+    is_visible:true,
+    search_keywords:(p.Tags||'').split(',').slice(0,10).map(t=>t.trim()).join(', '),
+    meta_description:(p.Description||p.Name||'').substring(0,255),
+    page_title:(p.Name||'').substring(0,255),
+    images:imgs.slice(0,5).map((url,i)=>({image_url:url,is_thumbnail:i===0,sort_order:i})),
+    custom_fields:[
+      {name:'Source Site',value:(p.Site||'').substring(0,255)},
+      {name:'External ID',value:String(p['Product ID']||'').substring(0,255)},
+      {name:'Original URL',value:(p['Product URL']||'').substring(0,255)},
+    ],
+  };
+  if(cmp>0) out.retail_price=cmp;
+  return out;
+}
+
+// ─── BC CSV ────────────────────────────────────────────────────────────────
+function buildCSVRow(p){
+  const pr=parseFloat(p['Price (GBP)']||0), cmp=parseFloat(p['Compare At Price']||0);
+  const s=(p['Stock Status']||'').toLowerCase();
+  const imgs=(p['All Image URLs']||'').split('|').map(u=>u.trim()).filter(Boolean).slice(0,3);
+  return{'Product Name':p.Name||'','Product Type':'physical','SKU':p.SKU||'','Price':pr.toFixed(2),'MSRP':cmp>0?cmp.toFixed(2):'','Weight':'0.5','Categories':p.Category||'Uncategorised','Brand Name':p['Vendor / Brand']||'','Current Stock':p['Inventory Qty']||'0','Track Inventory':'Y','Availability':s.includes('out')?'disabled':s.includes('back')?'preorder':'available','Allow Purchases':s.includes('out')?'N':'Y','Product Image URL - 1':imgs[0]||'','Product Image URL - 2':imgs[1]||'','Product Image URL - 3':imgs[2]||'','Import Strategy':'MERGE','Product Visible':'Y'};
+}
+
+// ─── Full Validation View ──────────────────────────────────────────────────
+function buildValidation(){
+  const errs=[],warns=[];let total=0,pass=0;
+  PRODUCTS.forEach((p,i)=>{
+    validate(p).forEach(c=>{
+      total++;
+      if(!c.pass) errs.push({product:p.Name||'Row '+(i+1),field:c.f,msg:c.msg});
+      else if(c.warn) warns.push({product:p.Name||'Row '+(i+1),field:c.f,msg:c.msg});
+      else pass++;
+    });
+  });
+  const pct=total?Math.round(pass/total*100):100;
+  const sc=document.getElementById('sc-issues');
+  if(sc) sc.textContent=errs.length>0?errs.length+' err':warns.length>0?warns.length+' warn':'✓ OK';
+  document.getElementById('view-validation').innerHTML=`
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:28px">
+      ${[['BC Compatibility',pct+'%',pct>=80?'var(--green)':pct>=60?'var(--amber)':'var(--red)','import readiness'],['Errors',errs.length,errs.length>0?'var(--red)':'var(--green)','must fix first'],['Warnings',warns.length,warns.length>0?'var(--amber)':'var(--green)','worth reviewing'],['Checks Passed',pass,'var(--green)',`of ${total} total`]].map(([l,v,c,s])=>`
+        <div class="valcard" style="padding:20px">
+          <div style="font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink3);margin-bottom:8px">${l}</div>
+          <div style="font-size:34px;font-weight:700;color:${c};letter-spacing:-1.5px;line-height:1">${v}</div>
+          <div style="font-size:10px;color:var(--ink3);margin-top:4px;font-family:var(--mono)">${s}</div>
+        </div>`).join('')}
+    </div>
+    ${errs.length?`<div class="valcard"><div class="vcTitle">❌ Errors — Fix Before Import (${errs.length})</div><div class="ilist">${errs.slice(0,40).map(e=>`<div class="iitem"><span style="font-size:16px;flex-shrink:0">❌</span><div><div class="in">${eh(e.product)}</div><div class="im">[${e.field}] ${eh(e.msg)}</div></div></div>`).join('')}</div></div>`:''}
+    ${warns.length?`<div class="valcard"><div class="vcTitle">⚠️ Warnings — Review Recommended (${warns.length})</div><div class="ilist">${warns.slice(0,40).map(w=>`<div class="iitem" style="border-color:#fde68a"><span style="font-size:16px;flex-shrink:0">⚠️</span><div><div class="in">${eh(w.product)}</div><div class="im">[${w.field}] ${eh(w.msg)}</div></div></div>`).join('')}</div></div>`:''}
+    ${!errs.length&&!warns.length?'<div class="allpass" style="font-size:20px;padding:60px">✅ All '+PRODUCTS.length+' products passed validation!<br><span style="font-size:14px;color:var(--ink3)">Ready to import into BigCommerce.</span></div>':''}`;
+}
+
+// ─── CSV Preview ───────────────────────────────────────────────────────────
+function buildCSVPreview(){
+  const cols=['Product Name','SKU','Price','MSRP','Categories','Brand Name','Current Stock','Availability','Product Image URL - 1','Allow Purchases'];
+  const rows=PRODUCTS.slice(0,20).map(p=>buildCSVRow(p));
+  document.getElementById('csvtbl').innerHTML=`<thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td title="${eh(r[c]||'')}">${eh((r[c]||'—').toString().substring(0,28))}</td>`).join('')}</tr>`).join('')}</tbody>`;
+}
+function dlCSV(){
+  const cols=['Product Name','Product Type','SKU','Description','Price','MSRP','Weight','Categories','Brand Name','Current Stock','Track Inventory','Allow Purchases','Availability','Product Image URL - 1','Product Image URL - 2','Product Image URL - 3','Import Strategy','Product Visible'];
+  const rows=PRODUCTS.map(p=>{const r=buildCSVRow(p);r.Description=p.Description||'';r['Product Type']='physical';r['Import Strategy']='MERGE';r['Product Visible']='Y';r.Weight='0.5';return cols.map(c=>`"${(r[c]||'').toString().replace(/"/g,'""')}"`).join(',');});
+  const csv=[cols.map(c=>`"${c}"`).join(','),...rows].join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'}));
+  a.download=`bigcommerce_import_${Date.now()}.csv`;a.click();
+}
+
+// ─── API Selector ──────────────────────────────────────────────────────────
+function buildAPISelector(){
+  document.getElementById('api-btns').innerHTML=PRODUCTS.slice(0,10).map((p,i)=>`<button class="btn btn-outline" style="font-size:11px;${i===0?'background:var(--ink);color:#fff;border-color:var(--ink)':''}" onclick="showAPI(${i})">${eh((p.Name||'').substring(0,22))}</button>`).join('');
+  showAPI(0);
+}
+function showAPI(i){
+  const p=filtered[i]||PRODUCTS[i]; if(!p) return;
+  const block=document.getElementById('api-block');
+  if(block) block.textContent=JSON.stringify(buildPayload(p),null,2);
+  sv('api');
+}
+function cpAPI(){ const b=document.getElementById('api-block'); if(b) navigator.clipboard.writeText(b.textContent); }
+
+// ─── View switching ────────────────────────────────────────────────────────
+function sv(v){
+  curView=v;
+  ['products','validation','csv','api'].forEach(id=>{
+    document.getElementById('view-'+id).classList.toggle('hidden',id!==v);
+    const n=document.getElementById('sv-'+id); if(n) n.classList.toggle('active',id===v);
+  });
+}
+
+// ─── Util ──────────────────────────────────────────────────────────────────
+function eh(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
+</script>
+</body>
+</html>
