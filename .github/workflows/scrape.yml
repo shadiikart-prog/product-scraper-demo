@@ -1,39 +1,41 @@
 name: Scrape Products & Update Dashboard
 
 on:
-  workflow_dispatch:        # Manual run button on GitHub
-  schedule:
-    - cron: '0 6 * * *'    # Auto daily at 6AM UTC
+  workflow_dispatch:
 
 jobs:
-  scrape-and-deploy:
+  scrape:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
       - name: Install dependencies
         run: pip install requests openpyxl
 
-      - name: Run scrapers
-        run: python scrapers/run_all_scrapers.py
+      - name: List files (debug)
+        run: find . -name "*.py" | head -20
 
-      - name: Embed data into dashboard
-        run: python scrapers/embed_data.py
-
-      - name: Commit updated dashboard
+      - name: Run HDEW scraper
         run: |
-          git config user.name "GitHub Actions Bot"
-          git config user.email "actions@github.com"
-          git add index.html
-          git add output/ || true
-          git diff --staged --quiet || git commit -m "Auto update: fresh product data $(date '+%Y-%m-%d %H:%M')"
+          cd scrapers
+          python scraper_hdew.py || python run_all_scrapers.py
+
+      - name: Run embed
+        run: |
+          ls -la
+          ls -la scrapers/ || true
+          python scrapers/embed_data.py || python embed_data.py
+
+      - name: Push changes
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@bot.com"
+          git add -A
+          git diff --staged --quiet || git commit -m "update products $(date '+%Y-%m-%d')"
           git push
