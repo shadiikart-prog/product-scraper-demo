@@ -27,23 +27,26 @@ jobs:
         run: |
           cd scrapers
           timeout 600 python run_all_scrapers.py || true
-          ls -la output/ || echo "No output"
+          echo "=== Output files ==="
+          ls -la output/ || echo "No output folder"
 
       - name: Embed data into dashboard
         run: |
           mkdir -p output
           cp -r scrapers/output/. ./output/ 2>/dev/null || true
-          python scrapers/embed_data.py || true
+          echo "=== JSON files found ==="
+          ls -la output/*.json || echo "No JSON files"
+          python scrapers/embed_data.py
+
+      - name: Show result
+        run: |
+          echo "=== Products in index.html ==="
+          grep -o 'Site:"[^"]*"' index.html | wc -l
 
       - name: Push changes
         run: |
           git config user.name "bot"
           git config user.email "bot@bot.com"
-          git stash || true
-          git fetch origin main
-          git reset --hard origin/main
-          git stash pop || true
-          git add index.html
-          git add output/ || true
+          git add index.html output/ || true
           git diff --staged --quiet || git commit -m "update products $(date '+%Y-%m-%d')"
           git push origin main
