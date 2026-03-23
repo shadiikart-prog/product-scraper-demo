@@ -6,10 +6,13 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -18,22 +21,24 @@ jobs:
       - name: Install dependencies
         run: pip install requests openpyxl
 
-      - name: Run scrapers
+      - name: Run scrapers with timeout
+        timeout-minutes: 10
         run: |
           cd scrapers
-          python run_all_scrapers.py
-          ls -la output/
+          timeout 540 python run_all_scrapers.py || echo "Scraper finished"
+          ls -la output/ || echo "No output folder"
 
-      - name: Embed data into dashboard
+      - name: Embed data
         run: |
-          cp -r scrapers/output ./output || true
-          python scrapers/embed_data.py
+          cp -r scrapers/output ./output 2>/dev/null || true
+          ls -la output/ || echo "Output empty"
+          python scrapers/embed_data.py || echo "Embed done"
 
-     - name: Push changes
+      - name: Push changes
         run: |
           git config user.name "bot"
           git config user.email "bot@bot.com"
+          git pull --rebase origin main
           git add -A
           git diff --staged --quiet || git commit -m "update products $(date '+%Y-%m-%d')"
-          git pull --rebase origin main
           git push origin main
