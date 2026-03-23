@@ -1,0 +1,9 @@
+{
+  "_comment": "Replace the placeholder values below with your real BigCommerce credentials.",
+  "_how_to_get": "BigCommerce Dashboard → Settings → API Accounts → Create API Account",
+  "_permissions_needed": "Products: MODIFY, Categories: READ-ONLY",
+
+  "store_hash": "YOUR_STORE_HASH",
+  "access_token": "YOUR_ACCESS_TOKEN",
+  "api_version": "v3"
+}
