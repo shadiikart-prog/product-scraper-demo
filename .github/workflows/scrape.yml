@@ -22,7 +22,7 @@ jobs:
         run: pip install requests beautifulsoup4 openpyxl
 
       - name: Run Factory Flooring Scraper
-        timeout-minutes: 25
+        timeout-minutes: 5000
         run: |
           cd scrapers
           python scraper_factoryflooring_shopify.py
