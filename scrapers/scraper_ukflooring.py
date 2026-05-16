@@ -27,7 +27,7 @@ except ImportError:
     print("          Run: pip install openpyxl")
 
 # ── Config ────────────────────────────────────────────────────────────────────
-BASE_URL    = "https://www.factory-direct-flooring.co.uk"
+BASE_URL    = "https://www.ukflooringdirect.co.uk"
 API_URL     = f"{BASE_URL}/products.json"
 LIMIT       = 250          # Max per page Shopify allows
 DELAY       = 0.5          # Seconds between requests (be polite)
