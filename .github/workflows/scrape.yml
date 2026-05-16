@@ -6,7 +6,7 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 55
     permissions:
       contents: write
     steps:
@@ -19,14 +19,14 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install requests beautifulsoup4 openpyxl
+        run: pip install requests
 
-      - name: Run Factory Flooring Scraper
-        timeout-minutes: 5000
+      - name: Run scraper
+        timeout-minutes: 50
         run: |
           cd scrapers
           python scraper_factoryflooring_shopify.py
-          echo "=== Files created ==="
+          echo "=== Output files ==="
           ls -la output/
 
       - name: Push CSV to GitHub
@@ -34,5 +34,5 @@ jobs:
           git config user.name "bot"
           git config user.email "bot@bot.com"
           git add scrapers/output/
-          git diff --staged --quiet || git commit -m "Factory flooring data $(date '+%Y-%m-%d')"
+          git diff --staged --quiet || git commit -m "Factory flooring Shopify CSV $(date '+%Y-%m-%d')"
           git push origin main
