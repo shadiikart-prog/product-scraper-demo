@@ -1,4 +1,4 @@
-name: Scrape Products & Update Dashboard
+name: Factory Flooring Scraper
 
 on:
   workflow_dispatch:
@@ -6,14 +6,13 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-python@v5
         with:
@@ -22,31 +21,18 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4 openpyxl
 
-      - name: Run scrapers
-        timeout-minutes: 12
+      - name: Run Factory Flooring Scraper
+        timeout-minutes: 25
         run: |
           cd scrapers
-          timeout 600 python scraper_factoryflooring_shopify.py || true
-          echo "=== Output files ==="
-          ls -la output/ || echo "No output folder"
+          python scraper_factoryflooring_shopify.py
+          echo "=== Files created ==="
+          ls -la output/
 
-      - name: Embed data into dashboard
-        run: |
-          mkdir -p output
-          cp -r scrapers/output/. ./output/ 2>/dev/null || true
-          echo "=== JSON files found ==="
-          ls -la output/*.json || echo "No JSON files"
-          python scrapers/embed_data.py
-
-      - name: Show result
-        run: |
-          echo "=== Products in index.html ==="
-          grep -o 'Site:"[^"]*"' index.html | wc -l
-
-      - name: Push changes
+      - name: Push CSV to GitHub
         run: |
           git config user.name "bot"
           git config user.email "bot@bot.com"
-          git add index.html output/ || true
-          git diff --staged --quiet || git commit -m "update products $(date '+%Y-%m-%d')"
+          git add scrapers/output/
+          git diff --staged --quiet || git commit -m "Factory flooring data $(date '+%Y-%m-%d')"
           git push origin main
