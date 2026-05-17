@@ -1,16 +1,11 @@
 """
 scraper_factoryflooring_shopify.py
-═══════════════════════════════════════════════════════════════════
-Scrapes ALL products from factory-direct-flooring.co.uk
-Outputs official Shopify product import CSV (with full images)
+════════════════════════════════════════════════════════════════
+FAST scraper for factory-direct-flooring.co.uk
+Strategy: Scrape CATEGORY LISTING pages only (not individual pages)
+         → 1 request = 20-30 products = 10x faster!
 
-HOW TO RUN:
-    pip install requests beautifulsoup4
-    python scraper_factoryflooring_shopify.py
-
-OUTPUT:
-    output/factory_flooring_shopify_YYYYMMDD.csv  ← Import into Shopify
-    output/factory_flooring_YYYYMMDD.json         ← Raw data backup
+Output: Shopify-ready CSV with images
 """
 
 import requests
@@ -22,17 +17,10 @@ import os
 from datetime import datetime
 from html import unescape
 
-try:
-    from bs4 import BeautifulSoup
-    BS4_OK = True
-except ImportError:
-    BS4_OK = False
-    print("⚠ Install beautifulsoup4: pip install beautifulsoup4")
-
-BASE_URL   = "https://www.factory-direct-flooring.co.uk"
 OUTPUT_DIR = "output"
-DELAY      = 1.2
+BASE_URL   = "https://www.factory-direct-flooring.co.uk"
 TIMESTAMP  = datetime.now().strftime("%Y%m%d_%H%M%S")
+DELAY      = 0.8
 
 HEADERS = {
     "User-Agent": (
@@ -40,182 +28,85 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
     ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-GB,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
 }
 
-# All category pages to scrape
+# All categories — show max products per page using ?product_list_limit=100
 CATEGORIES = [
-    ("Solid Wood Flooring",      "/solid-wood-flooring"),
-    ("Engineered Wood Flooring", "/engineered-wood-flooring"),
-    ("Laminate Flooring",        "/laminate-flooring"),
-    ("LVT Flooring",             "/lvt-flooring"),
-    ("Herringbone Flooring",     "/herringbone-flooring"),
-    ("Vinyl Flooring",           "/vinyl-flooring"),
-    ("Carpet",                   "/carpet"),
-    ("Underlay",                 "/underlay"),
+    "Solid Wood Flooring",
+    "Engineered Wood Flooring",
+    "Laminate Flooring",
+    "LVT Flooring",
+    "Herringbone Flooring",
+    "Vinyl Flooring",
+    "Carpet",
+    "Underlay",
 ]
 
-# ── Official Shopify CSV columns ──────────────────────────────────────────────
+CATEGORY_URLS = [
+    ("Solid Wood Flooring",      f"{BASE_URL}/solid-wood-flooring?product_list_limit=100"),
+    ("Engineered Wood Flooring", f"{BASE_URL}/engineered-wood-flooring?product_list_limit=100"),
+    ("Laminate Flooring",        f"{BASE_URL}/laminate-flooring?product_list_limit=100"),
+    ("LVT Flooring",             f"{BASE_URL}/lvt-flooring?product_list_limit=100"),
+    ("Herringbone Flooring",     f"{BASE_URL}/herringbone-flooring?product_list_limit=100"),
+    ("Vinyl Flooring",           f"{BASE_URL}/vinyl-flooring?product_list_limit=100"),
+    ("Carpet",                   f"{BASE_URL}/carpet?product_list_limit=100"),
+    ("Underlay",                 f"{BASE_URL}/underlay?product_list_limit=100"),
+]
+
 SHOPIFY_COLS = [
-    "Handle", "Title", "Body (HTML)", "Vendor", "Product Category",
-    "Type", "Tags", "Published",
-    "Option1 Name", "Option1 Value",
-    "Variant SKU", "Variant Grams", "Variant Inventory Tracker",
-    "Variant Inventory Qty", "Variant Inventory Policy",
-    "Variant Fulfillment Service", "Variant Price",
-    "Variant Compare At Price", "Variant Requires Shipping",
-    "Variant Taxable", "Image Src", "Image Position", "Image Alt Text",
-    "SEO Title", "SEO Description", "Status",
+    "Handle","Title","Body (HTML)","Vendor","Product Category",
+    "Type","Tags","Published",
+    "Option1 Name","Option1 Value",
+    "Variant SKU","Variant Grams","Variant Inventory Tracker",
+    "Variant Inventory Qty","Variant Inventory Policy",
+    "Variant Fulfillment Service","Variant Price",
+    "Variant Compare At Price","Variant Requires Shipping",
+    "Variant Taxable","Image Src","Image Position","Image Alt Text",
+    "SEO Title","SEO Description","Status",
 ]
-# ─────────────────────────────────────────────────────────────────────────────
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-def fetch(url, retries=3):
-    for attempt in range(retries):
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=25)
-            if r.status_code == 200:
-                return r.text
-            elif r.status_code == 404:
-                return ""
-            time.sleep(2)
-        except Exception as e:
-            print(f"    Retry {attempt+1}: {e}")
-            time.sleep(3)
-    return ""
-
-
-def clean_text(html_text):
-    if not html_text:
+def fetch(url):
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=25)
+        if r.status_code == 200:
+            return r.text
         return ""
-    text = unescape(str(html_text))
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    except Exception as e:
+        print(f"    Error: {e}")
+        return ""
 
+def clean(text):
+    if not text:
+        return ""
+    text = unescape(str(text))
+    text = re.sub(r"<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 def make_handle(title):
-    handle = title.lower().strip()
-    handle = re.sub(r"[^a-z0-9]+", "-", handle)
-    handle = handle.strip("-")
-    return handle[:200]
+    h = title.lower().strip()
+    h = re.sub(r"[^a-z0-9]+", "-", h).strip("-")
+    return h[:200]
 
+def norm_price(p):
+    try:
+        return f"{float(str(p).replace(',','').replace('£','').strip()):.2f}"
+    except Exception:
+        return ""
 
-def get_product_urls_from_sitemap():
-    """Try to get all product URLs from XML sitemap."""
-    product_urls = set()
-    sitemap_urls = [
-        f"{BASE_URL}/sitemap.xml",
-        f"{BASE_URL}/pub/sitemap.xml",
-        f"{BASE_URL}/sitemap_products_1.xml",
-    ]
-    for sm_url in sitemap_urls:
-        print(f"  Trying sitemap: {sm_url}")
-        html = fetch(sm_url)
-        if not html:
-            continue
-        # Extract product URLs
-        urls = re.findall(r'<loc>([^<]+)</loc>', html)
-        for u in urls:
-            # Product URLs usually don't have deep paths
-            if u.startswith(BASE_URL) and u.count("/") == 3:
-                product_urls.add(u)
-        # Also look for nested sitemaps
-        nested = re.findall(r'<loc>(https?://[^<]+\.xml[^<]*)</loc>', html)
-        for ns_url in nested:
-            ns_html = fetch(ns_url)
-            if ns_html:
-                ns_urls = re.findall(r'<loc>([^<]+)</loc>', ns_html)
-                for u in ns_urls:
-                    if u.startswith(BASE_URL) and u.count("/") == 3:
-                        product_urls.add(u)
-        if product_urls:
-            break
-    return list(product_urls)
+# ── Parse products from category listing page ─────────────────────────────────
 
+def parse_category_page(html, category):
+    """
+    Extract all products from a category listing page.
+    No need to visit individual product pages!
+    """
+    products = []
 
-def get_product_urls_from_category(cat_url):
-    """Scrape category pages to collect product URLs."""
-    product_urls = []
-    page = 1
-    url = BASE_URL + cat_url
-
-    while True:
-        html = fetch(url)
-        if not html:
-            break
-
-        # Extract product links
-        # Magento product URLs: domain.com/product-name (no subfolder)
-        found = re.findall(
-            r'href="(https://www\.factory-direct-flooring\.co\.uk/[a-z0-9][a-z0-9-]+)"',
-            html
-        )
-        before = len(product_urls)
-        for u in found:
-            # Filter out category/nav pages
-            skip = any(s in u for s in [
-                "/solid-wood", "/engineered", "/laminate", "/lvt",
-                "/herringbone", "/vinyl", "/carpet", "/underlay",
-                "/blog", "/about", "/contact", "/brand", "/advice",
-                "/customer", "/faqs", "?", "#"
-            ])
-            if not skip and u not in product_urls:
-                product_urls.append(u)
-
-        # Next page
-        next_match = re.search(
-            r'<a[^>]+href="([^"]*(?:\?p=|&p=)(\d+)[^"]*)"[^>]*>',
-            html, re.IGNORECASE
-        )
-        rel_next = re.search(r'<link[^>]+rel=["\']next["\'][^>]+href=["\']([^"\']+)["\']', html)
-
-        next_url = None
-        if rel_next:
-            next_url = rel_next.group(1)
-            if not next_url.startswith("http"):
-                next_url = BASE_URL + next_url
-        elif next_match:
-            next_url = next_match.group(1)
-            if not next_url.startswith("http"):
-                next_url = BASE_URL + next_url
-
-        added = len(product_urls) - before
-        print(f"    Page {page}: +{added} URLs (total: {len(product_urls)})")
-
-        if not next_url or next_url == url or added == 0:
-            break
-
-        url = next_url
-        page += 1
-        time.sleep(DELAY)
-
-    return product_urls
-
-
-def scrape_product_page(url, category):
-    """Scrape a single product page and return product dict."""
-    html = fetch(url)
-    if not html:
-        return None
-
-    product = {
-        "url"         : url,
-        "category"    : category,
-        "name"        : "",
-        "sku"         : "",
-        "price"       : "",
-        "compare_price": "",
-        "description" : "",
-        "images"      : [],
-        "brand"       : "",
-        "tags"        : [],
-        "stock"       : "active",
-    }
-
-    # ── 1. JSON-LD (most reliable) ──────────────────────────────────────────
+    # ── Method 1: JSON-LD ItemList on category page ──────────────────────────
     json_ld_blocks = re.findall(
         r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
         html, re.DOTALL
@@ -225,129 +116,285 @@ def scrape_product_page(url, category):
             data = json.loads(block.strip())
             items = data if isinstance(data, list) else [data]
             for item in items:
-                if item.get("@type") not in ("Product", "product"):
+                if not isinstance(item, dict):
                     continue
-
-                product["name"]  = clean_text(item.get("name", ""))
-                product["sku"]   = item.get("sku", "")
-                product["description"] = item.get("description", "")
-
-                # Brand
-                brand = item.get("brand", {})
-                if isinstance(brand, dict):
-                    product["brand"] = clean_text(brand.get("name", ""))
-                elif isinstance(brand, str):
-                    product["brand"] = clean_text(brand)
-
-                # Price & availability
-                offers = item.get("offers", {})
-                if isinstance(offers, list):
-                    offers = offers[0] if offers else {}
-                if isinstance(offers, dict):
-                    product["price"] = str(offers.get("price", ""))
-                    product["compare_price"] = str(offers.get("highPrice", ""))
-                    avail = offers.get("availability", "")
-                    product["stock"] = "active" if "InStock" in avail else "draft"
-
-                # Images from JSON-LD
-                imgs = item.get("image", [])
-                if isinstance(imgs, str):
-                    imgs = [imgs]
-                elif isinstance(imgs, dict):
-                    imgs = [imgs.get("url", "")]
-                for img in imgs:
-                    if img and img not in product["images"]:
-                        product["images"].append(img)
-
+                # ItemList containing products
+                if item.get("@type") == "ItemList":
+                    for elem in item.get("itemListElement", []):
+                        p = elem.get("item", elem)
+                        parsed = extract_product_jsonld(p, category)
+                        if parsed:
+                            products.append(parsed)
+                # Single product
+                elif item.get("@type") == "Product":
+                    parsed = extract_product_jsonld(item, category)
+                    if parsed:
+                        products.append(parsed)
         except Exception:
             pass
 
-    # ── 2. HTML fallback for name ────────────────────────────────────────────
-    if not product["name"]:
-        title_match = re.search(
-            r'<h1[^>]*(?:class="[^"]*(?:page-title|product-name|title)[^"]*")?[^>]*>'
-            r'\s*<span[^>]*>(.*?)</span>',
-            html, re.DOTALL | re.IGNORECASE
-        )
-        if title_match:
-            product["name"] = clean_text(title_match.group(1))
+    # ── Method 2: HTML product cards (Hyva/Magento pattern) ──────────────────
+    if not products:
+        products = parse_html_product_cards(html, category)
 
-    # ── 3. HTML fallback for price ───────────────────────────────────────────
-    if not product["price"]:
-        price_match = re.search(
-            r'<span[^>]*class="[^"]*price[^"]*"[^>]*>\s*£\s*([\d,]+\.?\d*)',
-            html, re.IGNORECASE
-        )
-        if price_match:
-            product["price"] = price_match.group(1).replace(",", "")
+    # ── Method 3: Embedded JSON in page script ────────────────────────────────
+    if not products:
+        products = parse_embedded_json(html, category)
 
-    # ── 4. Extract ALL images from HTML ─────────────────────────────────────
-    img_urls = re.findall(
-        r'(?:src|data-src|data-lazy-src)=["\']'
-        r'(https://imagely\.factory-direct-flooring\.co\.uk/media/catalog/product[^"\'?\s]+)',
-        html
+    return products
+
+
+def extract_product_jsonld(item, category):
+    """Extract product from JSON-LD Product object."""
+    if not isinstance(item, dict):
+        return None
+    if item.get("@type") not in ("Product", "product"):
+        return None
+
+    name = clean(item.get("name", ""))
+    if not name or len(name) < 3:
+        return None
+
+    # Price
+    price = ""
+    offers = item.get("offers", {})
+    if isinstance(offers, list):
+        offers = offers[0] if offers else {}
+    if isinstance(offers, dict):
+        price = str(offers.get("price", offers.get("lowPrice", "")))
+        avail = offers.get("availability", "")
+        stock = "active" if "InStock" in avail else "draft"
+    else:
+        stock = "active"
+
+    # Images
+    images = []
+    imgs = item.get("image", [])
+    if isinstance(imgs, str): imgs = [imgs]
+    if isinstance(imgs, dict): imgs = [imgs.get("url", "")]
+    for img in imgs:
+        if img and str(img).startswith("http"):
+            images.append(str(img))
+
+    # Brand
+    brand = ""
+    b = item.get("brand", {})
+    if isinstance(b, dict): brand = clean(b.get("name", ""))
+    elif isinstance(b, str): brand = clean(b)
+
+    return {
+        "name"       : name,
+        "sku"        : str(item.get("sku", "")),
+        "price"      : price,
+        "compare"    : "",
+        "brand"      : brand,
+        "category"   : category,
+        "images"     : images,
+        "description": item.get("description", ""),
+        "tags"       : [],
+        "stock"      : stock,
+        "url"        : item.get("url", ""),
+    }
+
+
+def parse_html_product_cards(html, category):
+    """Parse product cards directly from category page HTML."""
+    products = []
+    seen     = set()
+
+    # Hyva/Magento product card patterns
+    # Products are in <li> or <div> with class containing 'product-item'
+    card_pattern = re.compile(
+        r'<(?:li|div|article)[^>]+class="[^"]*product[^"]*item[^"]*"[^>]*>'
+        r'(.*?)'
+        r'</(?:li|div|article)>',
+        re.DOTALL | re.IGNORECASE
     )
-    for img in img_urls:
-        # Clean up size params if any
-        img_clean = img.split("?")[0]
-        if img_clean not in product["images"]:
-            product["images"].append(img_clean)
 
-    # Also catch from og:image
-    og_img = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)', html)
-    if og_img:
-        img = og_img.group(1)
-        if "catalog/product" in img and img not in product["images"]:
-            product["images"].insert(0, img)
+    for card_match in card_pattern.finditer(html):
+        card = card_match.group(1)
 
-    # ── 5. Tags from breadcrumb / meta keywords ──────────────────────────────
-    meta_kw = re.search(r'<meta[^>]+name=["\']keywords["\'][^>]+content=["\']([^"\']+)', html)
-    if meta_kw:
-        product["tags"] = [k.strip() for k in meta_kw.group(1).split(",") if k.strip()]
+        # Name
+        name_m = re.search(
+            r'class="[^"]*product[^"]*name[^"]*"[^>]*>.*?<a[^>]*>(.*?)</a>',
+            card, re.DOTALL | re.IGNORECASE
+        )
+        if not name_m:
+            name_m = re.search(r'<a[^>]+title="([^"]{5,})"', card)
 
-    return product if product["name"] else None
+        name = clean(name_m.group(1)) if name_m else ""
+        if not name or name in seen:
+            continue
+        seen.add(name)
+
+        # Price
+        price_m = re.search(r'£\s*([\d,]+\.?\d*)', card)
+        price   = price_m.group(1).replace(",", "") if price_m else ""
+
+        # Image — CDN
+        img_m = re.search(
+            r'(?:src|data-src)=["\']'
+            r'(https://imagely\.factory-direct-flooring\.co\.uk/media/catalog/product[^"\'?\s]+)',
+            card
+        )
+        image = img_m.group(1).split("?")[0] if img_m else ""
+
+        # URL
+        url_m = re.search(
+            r'href="(https://www\.factory-direct-flooring\.co\.uk/[a-z0-9][^"?#]+)"',
+            card
+        )
+        prod_url = url_m.group(1) if url_m else ""
+
+        products.append({
+            "name"       : name,
+            "sku"        : "",
+            "price"      : price,
+            "compare"    : "",
+            "brand"      : "Factory Direct Flooring",
+            "category"   : category,
+            "images"     : [image] if image else [],
+            "description": "",
+            "tags"       : [category.lower().replace(" ", "-")],
+            "stock"      : "active",
+            "url"        : prod_url,
+        })
+
+    return products
 
 
-def product_to_shopify_rows(product):
-    """Convert one product dict into Shopify CSV rows (multiple rows for multiple images)."""
-    if not product or not product["name"]:
+def parse_embedded_json(html, category):
+    """Try to find product data in embedded JS objects."""
+    products = []
+    seen     = set()
+
+    # Some Magento themes embed product data as JS objects
+    # Pattern: {"id":123,"name":"Product Name","price":29.99,"image":"..."}
+    pattern = re.compile(
+        r'\{[^{}]*"name"\s*:\s*"([^"]{5,})"[^{}]*"price"\s*:\s*([\d.]+)[^{}]*\}',
+        re.IGNORECASE
+    )
+    for m in pattern.finditer(html):
+        name  = clean(m.group(1))
+        price = m.group(2)
+        if name and name not in seen and len(name) > 5:
+            seen.add(name)
+            products.append({
+                "name"       : name,
+                "sku"        : "",
+                "price"      : price,
+                "compare"    : "",
+                "brand"      : "Factory Direct Flooring",
+                "category"   : category,
+                "images"     : [],
+                "description": "",
+                "tags"       : [category.lower().replace(" ", "-")],
+                "stock"      : "active",
+                "url"        : "",
+            })
+
+    return products
+
+
+# ── Scrape all category pages ─────────────────────────────────────────────────
+
+def scrape_all_categories():
+    all_products = []
+    seen_names   = set()
+
+    for cat_name, base_cat_url in CATEGORY_URLS:
+        print(f"\n  [{cat_name}]")
+        page     = 1
+        cat_url  = base_cat_url
+
+        while True:
+            print(f"    Page {page}: {cat_url}")
+            html = fetch(cat_url)
+            if not html:
+                print(f"    ✗ Failed to fetch")
+                break
+
+            products = parse_category_page(html, cat_name)
+
+            # Deduplicate
+            new = []
+            for p in products:
+                key = p["name"].lower().strip()
+                if key and key not in seen_names:
+                    seen_names.add(key)
+                    new.append(p)
+
+            all_products.extend(new)
+            print(f"    +{len(new)} new products (total: {len(all_products)})")
+
+            if not new and page > 1:
+                print(f"    No new products — done with this category")
+                break
+
+            # Find next page
+            next_url = None
+
+            # rel=next link tag
+            rel = re.search(
+                r'<link[^>]+rel=["\']next["\'][^>]+href=["\']([^"\']+)["\']', html
+            )
+            if rel:
+                nxt = rel.group(1)
+                next_url = nxt if nxt.startswith("http") else BASE_URL + nxt
+
+            # Pagination ?p= link
+            if not next_url:
+                pag = re.search(
+                    r'href=["\']([^"\']*[?&]p=' + str(page+1) + r'[^"\']*)["\']', html
+                )
+                if pag:
+                    nxt = pag.group(1)
+                    next_url = nxt if nxt.startswith("http") else BASE_URL + nxt
+
+            if not next_url:
+                print(f"    Last page reached")
+                break
+
+            cat_url = next_url
+            page   += 1
+            time.sleep(DELAY)
+
+        print(f"  ✓ {cat_name}: done")
+        time.sleep(DELAY)
+
+    return all_products
+
+
+# ── Convert to Shopify CSV ────────────────────────────────────────────────────
+
+def to_shopify_rows(p):
+    name   = p.get("name", "")
+    if not name:
         return []
 
-    handle   = make_handle(product["name"])
-    title    = product["name"]
-    body     = product.get("description", "")
-    if body and not body.startswith("<"):
+    handle  = make_handle(name)
+    body    = p.get("description", "")
+    if body and not body.strip().startswith("<"):
         body = f"<p>{body}</p>"
 
-    vendor   = product.get("brand", "Factory Direct Flooring")
-    ptype    = product.get("category", "Flooring")
-    tags     = ", ".join(product.get("tags", []))
-    price    = product.get("price", "0.00")
-    compare  = product.get("compare_price", "")
-    sku      = product.get("sku", "")
-    status   = product.get("stock", "active")
-    images   = product.get("images", [])
-
-    # Ensure price is numeric
-    try:
-        price = f"{float(str(price).replace(',','')):.2f}"
-    except Exception:
-        price = "0.00"
-
-    try:
-        compare = f"{float(str(compare).replace(',','')):.2f}" if compare else ""
-    except Exception:
-        compare = ""
+    vendor  = p.get("brand", "") or "Factory Direct Flooring"
+    ptype   = p.get("category", "Flooring")
+    tags    = ", ".join(p.get("tags", []))
+    images  = [i for i in p.get("images", []) if i]
+    status  = p.get("stock", "active")
+    price   = norm_price(p.get("price", "0"))
+    compare = norm_price(p.get("compare", ""))
+    sku     = p.get("sku", "")
 
     rows = []
 
-    # First row — full product data + first image
+    # Row 1 — full product data
     first_img = images[0] if images else ""
     rows.append({
         "Handle"                    : handle,
-        "Title"                     : title,
+        "Title"                     : name,
         "Body (HTML)"               : body,
-        "Vendor"                    : vendor or "Factory Direct Flooring",
+        "Vendor"                    : vendor,
         "Product Category"          : ptype,
         "Type"                      : ptype,
         "Tags"                      : tags,
@@ -360,130 +407,94 @@ def product_to_shopify_rows(product):
         "Variant Inventory Qty"     : "100",
         "Variant Inventory Policy"  : "deny",
         "Variant Fulfillment Service": "manual",
-        "Variant Price"             : price,
+        "Variant Price"             : price or "0.00",
         "Variant Compare At Price"  : compare,
         "Variant Requires Shipping" : "TRUE",
         "Variant Taxable"           : "TRUE",
         "Image Src"                 : first_img,
-        "Image Position"            : "1",
-        "Image Alt Text"            : title,
-        "SEO Title"                 : title[:255],
-        "SEO Description"           : clean_text(body)[:320],
+        "Image Position"            : "1" if first_img else "",
+        "Image Alt Text"            : name,
+        "SEO Title"                 : name[:255],
+        "SEO Description"           : clean(body)[:320],
         "Status"                    : status,
     })
 
-    # Additional rows for extra images (same handle, no product data)
-    for i, img_url in enumerate(images[1:], 2):
-        rows.append({
-            "Handle"       : handle,
-            "Image Src"    : img_url,
+    # Extra image rows
+    for i, img in enumerate(images[1:], 2):
+        empty = {k: "" for k in SHOPIFY_COLS}
+        empty.update({
+            "Handle"        : handle,
+            "Image Src"     : img,
             "Image Position": str(i),
-            "Image Alt Text": title,
-            # All other fields empty for image-only rows
-            **{k: "" for k in SHOPIFY_COLS if k not in (
-                "Handle", "Image Src", "Image Position", "Image Alt Text"
-            )},
+            "Image Alt Text": name,
         })
+        rows.append(empty)
 
     return rows
 
 
+# ── Main ──────────────────────────────────────────────────────────────────────
+
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    start = time.time()
 
-    print("\n" + "═"*62)
-    print("  Factory Direct Flooring → Shopify CSV Scraper")
-    print(f"  {BASE_URL}")
-    print("═"*62)
+    print("\n" + "═"*60)
+    print("  Factory Direct Flooring → Shopify CSV (Fast Mode)")
+    print("  Strategy: Category pages only — no individual pages!")
+    print("═"*60)
 
-    # ── Step 1: Collect all product URLs ─────────────────────────────────────
-    all_urls = {}  # url → category
+    # Scrape
+    products = scrape_all_categories()
 
-    # Try sitemap first
-    print("\n[1/3] Getting product URLs from sitemap...")
-    sitemap_urls = get_product_urls_from_sitemap()
-    if sitemap_urls:
-        print(f"  ✓ {len(sitemap_urls)} URLs from sitemap")
-        for u in sitemap_urls:
-            all_urls[u] = "Flooring"
-
-    # Then scrape categories
-    print("\n[2/3] Scraping category pages...")
-    for cat_name, cat_path in CATEGORIES:
-        print(f"\n  Category: {cat_name}")
-        urls = get_product_urls_from_category(cat_path)
-        for u in urls:
-            if u not in all_urls:
-                all_urls[u] = cat_name
-        print(f"  → {len(urls)} URLs found")
-        time.sleep(DELAY)
-
-    print(f"\n  Total unique product URLs: {len(all_urls)}")
-
-    if not all_urls:
-        print("\n  ⚠ No product URLs found.")
-        print("  The website may require JavaScript to load products.")
-        print("  Try running with Selenium or Playwright for JS rendering.")
-        # Save empty file so pipeline doesn't crash
-        with open(f"{OUTPUT_DIR}/factory_flooring_shopify_{TIMESTAMP}.csv", "w",
-                  encoding="utf-8-sig", newline="") as f:
+    if not products:
+        print("\n  ⚠ No products found!")
+        print("  The site may be blocking automated requests.")
+        # Save empty CSV so workflow doesn't crash
+        out = f"{OUTPUT_DIR}/factory_flooring_shopify_{TIMESTAMP}.csv"
+        with open(out, "w", encoding="utf-8-sig", newline="") as f:
             csv.DictWriter(f, fieldnames=SHOPIFY_COLS).writeheader()
         return
 
-    # ── Step 2: Scrape each product page ─────────────────────────────────────
-    print("\n[3/3] Scraping product pages...")
-    all_products = []
-    raw_data     = []
-
-    for i, (url, category) in enumerate(all_urls.items(), 1):
-        print(f"  [{i:>4}/{len(all_urls)}] {url.split('/')[-1][:50]}")
-        product = scrape_product_page(url, category)
-        if product:
-            all_products.append(product)
-            raw_data.append({
-                "Site"           : "Factory Direct Flooring",
-                "Name"           : product["name"],
-                "SKU"            : product["sku"],
-                "Category"       : product["category"],
-                "Vendor / Brand" : product["brand"],
-                "Price (GBP)"    : product["price"],
-                "Compare At Price": product["compare_price"],
-                "Stock Status"   : "In Stock" if product["stock"] == "active" else "Out of Stock",
-                "Description"    : clean_text(product["description"])[:400],
-                "Main Image URL" : product["images"][0] if product["images"] else "",
-                "All Image URLs" : " | ".join(product["images"]),
-                "Product URL"    : url,
-            })
-        time.sleep(DELAY)
-
-    print(f"\n  ✓ {len(all_products)} products scraped successfully")
-
-    # ── Step 3: Save Shopify CSV ──────────────────────────────────────────────
+    # Save Shopify CSV
     shopify_rows = []
-    for product in all_products:
-        shopify_rows.extend(product_to_shopify_rows(product))
+    for p in products:
+        shopify_rows.extend(to_shopify_rows(p))
 
-    shopify_file = f"{OUTPUT_DIR}/factory_flooring_shopify_{TIMESTAMP}.csv"
-    with open(shopify_file, "w", encoding="utf-8-sig", newline="") as f:
+    csv_file = f"{OUTPUT_DIR}/factory_flooring_shopify_{TIMESTAMP}.csv"
+    with open(csv_file, "w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=SHOPIFY_COLS, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(shopify_rows)
 
-    print(f"\n  Shopify CSV → {shopify_file}")
-    print(f"  ({len(shopify_rows)} rows including image rows)")
-
-    # ── Step 4: Save JSON backup ──────────────────────────────────────────────
+    # Save JSON
     json_file = f"{OUTPUT_DIR}/factory_flooring_{TIMESTAMP}.json"
     with open(json_file, "w", encoding="utf-8") as f:
-        json.dump(raw_data, f, ensure_ascii=False, indent=2)
-    print(f"  JSON backup → {json_file}")
+        json.dump([{
+            "Name"        : p["name"],
+            "SKU"         : p["sku"],
+            "Price (GBP)" : p["price"],
+            "Brand"       : p["brand"],
+            "Category"    : p["category"],
+            "Stock"       : p["stock"],
+            "Image"       : p["images"][0] if p["images"] else "",
+            "All Images"  : " | ".join(p["images"]),
+            "Description" : clean(p["description"])[:400],
+            "URL"         : p["url"],
+        } for p in products], f, ensure_ascii=False, indent=2)
 
-    print(f"\n{'═'*62}")
-    print(f"  ✅ DONE!")
-    print(f"  {len(all_products)} products | {len(shopify_rows)} CSV rows")
-    print(f"\n  TO IMPORT INTO SHOPIFY:")
-    print(f"  Products → Import → Upload CSV → factory_flooring_shopify_*.csv")
-    print(f"{'═'*62}\n")
+    elapsed = round(time.time() - start)
+    mins    = elapsed // 60
+    secs    = elapsed % 60
+
+    print(f"\n{'═'*60}")
+    print(f"  ✅ COMPLETE in {mins}m {secs}s")
+    print(f"  Products  : {len(products)}")
+    print(f"  CSV rows  : {len(shopify_rows)}")
+    print(f"  CSV file  : {csv_file}")
+    print(f"\n  HOW TO IMPORT IN SHOPIFY:")
+    print(f"  Products → Import → Upload CSV")
+    print("═"*60)
 
 
 if __name__ == "__main__":
