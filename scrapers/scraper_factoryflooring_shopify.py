@@ -1,23 +1,14 @@
 """
 scraper_complete_system.py
 ════════════════════════════════════════════════════════════════
-COMPLETE scraper for factory-direct-flooring.co.uk
+COMPLETE scraper — visits every product page individually
+Gets: ALL images, prices, descriptions, SKUs, brands, stock
 
-SCRAPES:
-  ✓ Full navigation structure (all categories + subcategories)
-  ✓ All products from every category
-  ✓ All product images (real CDN only, no placeholders)
-  ✓ Prices + sale/compare prices
-  ✓ Full descriptions
-  ✓ SKU / product codes
-  ✓ Brand / vendor info
-  ✓ Stock status
-
-OUTPUT FILES (in output/ folder):
-  1. factory_shopify_products.csv     → Import to Shopify (Products)
-  2. factory_shopify_collections.csv  → Import to Shopify (Collections)
-  3. factory_navigation.json          → Full category tree
-  4. factory_all_products.json        → Raw product data backup
+Strategy:
+  Step 1 → Collect all product URLs from category pages (fast)
+  Step 2 → Visit each product page in parallel (10 threads)
+  Step 3 → Extract everything from JSON-LD + HTML
+  Step 4 → Save 4 output files (Shopify ready)
 """
 
 import requests
@@ -28,23 +19,23 @@ import re
 import os
 from datetime import datetime
 from html import unescape
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ── Config ────────────────────────────────────────────────────────────────────
-BASE_URL   = "https://www.factory-direct-flooring.co.uk"
-OUTPUT_DIR = "output"
-TIMESTAMP  = datetime.now().strftime("%Y%m%d_%H%M%S")
-DELAY      = 0.8
-REAL_CDN   = "imagely.factory-direct-flooring.co.uk/media/catalog/product/cache"
-PLACEHOLDER= "placeholder"
+OUTPUT_DIR  = "output"
+BASE_URL    = "https://www.factory-direct-flooring.co.uk"
+TIMESTAMP   = datetime.now().strftime("%Y%m%d_%H%M%S")
+REAL_CDN    = "imagely.factory-direct-flooring.co.uk/media/catalog/product"
+PLACEHOLDER = "placeholder"
+THREADS     = 10
+DELAY       = 0.2
 
 HEADERS = {
-    "User-Agent"     : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "User-Agent"     : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
     "Accept"         : "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-GB,en;q=0.9",
 }
 
-# Valid Shopify taxonomy
-SHOPIFY_CAT_MAP = {
+SHOPIFY_TAXONOMY = {
     "wood"       : "Home & Garden > Decor > Flooring",
     "laminate"   : "Home & Garden > Decor > Flooring",
     "lvt"        : "Home & Garden > Decor > Flooring",
@@ -54,6 +45,17 @@ SHOPIFY_CAT_MAP = {
     "underlay"   : "Home & Garden > Decor > Flooring",
     "flooring"   : "Home & Garden > Decor > Flooring",
 }
+
+CATEGORY_URLS = [
+    ("Solid Wood Flooring",      f"{BASE_URL}/solid-wood-flooring"),
+    ("Engineered Wood Flooring", f"{BASE_URL}/engineered-wood-flooring"),
+    ("Laminate Flooring",        f"{BASE_URL}/laminate-flooring"),
+    ("LVT Flooring",             f"{BASE_URL}/lvt-flooring"),
+    ("Herringbone Flooring",     f"{BASE_URL}/herringbone-flooring"),
+    ("Vinyl Flooring",           f"{BASE_URL}/vinyl-flooring"),
+    ("Carpet",                   f"{BASE_URL}/carpet"),
+    ("Underlay",                 f"{BASE_URL}/underlay"),
+]
 
 SHOPIFY_PRODUCT_COLS = [
     "Handle","Title","Body (HTML)","Vendor","Product Category","Type","Tags",
@@ -65,30 +67,26 @@ SHOPIFY_PRODUCT_COLS = [
 ]
 
 SHOPIFY_COLLECTION_COLS = [
-    "Handle","Title","Body (HTML)","Published","Image Src","Image Alt Text",
-    "Sort Order","Template Suffix","Updated At",
+    "Handle","Title","Body (HTML)","Published",
+    "Image Src","Image Alt Text","Sort Order","Updated At",
 ]
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  HELPERS
+# HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def fetch(url):
     for attempt in range(3):
         try:
-            r = requests.get(url, headers=HEADERS, timeout=30)
+            r = requests.get(url, headers=HEADERS, timeout=25)
             if r.status_code == 200:
                 return r.text
             if r.status_code == 404:
                 return ""
-        except Exception as e:
-            if attempt == 2:
-                print(f"    ✗ Failed: {url[:60]} — {e}")
-            time.sleep(2)
+        except Exception:
+            time.sleep(1.5)
     return ""
-
 
 def clean(text):
     if not text:
@@ -97,12 +95,9 @@ def clean(text):
     text = re.sub(r"<[^>]+>", " ", text)
     return re.sub(r"\s+", " ", text).strip()
 
-
-def make_handle(title):
-    h = title.lower().strip()
-    h = re.sub(r"[^a-z0-9]+", "-", h).strip("-")
+def make_handle(s):
+    h = re.sub(r"[^a-z0-9]+", "-", s.lower().strip()).strip("-")
     return h[:200]
-
 
 def norm_price(p):
     try:
@@ -111,438 +106,359 @@ def norm_price(p):
     except Exception:
         return ""
 
+def is_real_img(url):
+    return bool(url) and REAL_CDN in url and PLACEHOLDER not in url.lower()
 
-def is_real_image(url):
-    if not url:
-        return False
-    return REAL_CDN in url and PLACEHOLDER not in url.lower()
+def clean_img(url):
+    return url.strip().split("?")[0] if url else ""
 
-
-def get_real_images(html_block):
-    images = []
-    for src in re.findall(r'(?:src|data-src)=["\']([^"\']+)["\']', html_block, re.IGNORECASE):
-        src = src.strip().split("?")[0]
-        if is_real_image(src) and src not in images:
-            images.append(src)
-    return images
-
-
-def get_shopify_category(cat_name):
+def get_shopify_cat(cat_name):
     cat_lower = cat_name.lower()
-    for key, val in SHOPIFY_CAT_MAP.items():
+    for key, val in SHOPIFY_TAXONOMY.items():
         if key in cat_lower:
             return val
     return "Home & Garden > Decor > Flooring"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  STEP 1 — SCRAPE FULL NAVIGATION
+# STEP 1 — COLLECT ALL PRODUCT URLs FROM CATEGORY PAGES
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def scrape_navigation():
+def collect_product_urls():
     """
-    Scrape the full navigation menu from the homepage.
-    Returns: dict with full category tree
+    Fast pass — just collect all product URLs from category listing pages.
+    No individual page visits yet.
     """
-    print("\n" + "─"*60)
-    print("  STEP 1: Scraping navigation structure...")
-    print("─"*60)
+    url_to_cat = {}   # url → category name
+    seen       = set()
 
-    html = fetch(BASE_URL)
-    if not html:
-        print("  ✗ Could not fetch homepage")
-        return {}
+    print("\n" + "═"*62)
+    print("  STEP 1: Collecting all product URLs...")
+    print("═"*62)
 
-    nav = {
-        "site"      : BASE_URL,
-        "scraped_at": datetime.now().isoformat(),
-        "categories": []
-    }
-
-    # ── Find main navigation menu ─────────────────────────────────────────────
-    # Hyva/Magento nav: <nav> or <ul> with class containing "nav" or "menu"
-    nav_block = ""
-    for pattern in [
-        r'<nav[^>]+(?:id|class)="[^"]*(?:main|primary|desktop)[^"]*"[^>]*>(.*?)</nav>',
-        r'<ul[^>]+(?:id|class)="[^"]*(?:nav-items|navigation|menu)[^"]*"[^>]*>(.*?)</ul>',
-        r'<nav[^>]*>(.*?)</nav>',
-    ]:
-        m = re.search(pattern, html, re.DOTALL | re.IGNORECASE)
-        if m:
-            nav_block = m.group(1)
-            break
-
-    if not nav_block:
-        nav_block = html  # fallback: search whole page
-
-    # ── Extract category links ─────────────────────────────────────────────────
-    # Find all links that look like categories
-    cat_links = re.findall(
-        r'<a[^>]+href="(' + re.escape(BASE_URL) + r'/[a-z0-9][a-z0-9-]+/?)"[^>]*>\s*([^<]{2,60})\s*</a>',
-        nav_block, re.IGNORECASE
-    )
-
-    seen_urls = set()
-    top_level = []
-
-    for url, name in cat_links:
-        url  = url.rstrip("/")
-        name = clean(name)
-
-        # Skip non-category pages
-        skip_words = ["blog","about","contact","advice","faq","account",
-                      "login","register","wishlist","cart","checkout","search"]
-        if any(w in url.lower() for w in skip_words):
-            continue
-        if not name or len(name) < 3 or url in seen_urls:
-            continue
-
-        seen_urls.add(url)
-        slug = url.replace(BASE_URL+"/","")
-
-        top_level.append({
-            "name"        : name,
-            "url"         : url,
-            "slug"        : slug,
-            "handle"      : make_handle(name),
-            "subcategories": [],
-            "product_count": 0,
-        })
-
-    # ── Find subcategories for each top-level category ────────────────────────
-    print(f"  Found {len(top_level)} top-level categories")
-
-    for cat in top_level:
-        cat_html = fetch(cat["url"])
-        if not cat_html:
-            continue
-
-        # Find subcategory links within this category page
-        sub_links = re.findall(
-            r'<a[^>]+href="(' + re.escape(BASE_URL) + r'/[a-z0-9][a-z0-9-]+/?)"[^>]*>\s*([^<]{2,60})\s*</a>',
-            cat_html, re.IGNORECASE
-        )
-
-        sub_seen = set()
-        for url, name in sub_links:
-            url  = url.rstrip("/")
-            name = clean(name)
-
-            # Must be child of parent
-            if cat["url"] not in url and cat["slug"] not in url.lower():
-                continue
-            if url == cat["url"] or url in sub_seen or not name:
-                continue
-
-            sub_seen.add(url)
-            cat["subcategories"].append({
-                "name"  : name,
-                "url"   : url,
-                "handle": make_handle(name),
-            })
-
-        print(f"    ✓ {cat['name']}: {len(cat['subcategories'])} subcategories")
-        time.sleep(DELAY)
-
-    nav["categories"] = top_level
-
-    # Save navigation JSON
-    nav_file = f"{OUTPUT_DIR}/factory_navigation.json"
-    with open(nav_file, "w", encoding="utf-8") as f:
-        json.dump(nav, f, ensure_ascii=False, indent=2)
-    print(f"\n  ✓ Navigation saved → {nav_file}")
-
-    return nav
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  STEP 2 — EXTRACT PRODUCTS FROM ONE PAGE
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def extract_products_from_page(html, category_name):
-    """Extract all products from a category listing page."""
-    products = {}  # handle → product dict
-
-    # ── Method 1: card-image divs (exact structure from site inspect) ─────────
-    card_sections = re.split(
-        r'<div[^>]+class="[^"]*card-image[^"]*"[^>]*>',
-        html
-    )
-
-    for i, section in enumerate(card_sections[1:], 1):
-        # Get product URL
-        url_m = re.search(
-            r'href=["\'](' + re.escape(BASE_URL) + r'/[a-z0-9][a-z0-9-]+)["\']',
-            section
-        )
-        if not url_m:
-            continue
-        prod_url = url_m.group(1)
-        handle   = make_handle(prod_url.replace(BASE_URL+"/",""))
-
-        if handle in products:
-            continue
-
-        # Real images only
-        images = get_real_images(section)
-
-        # Name from img alt
-        name = ""
-        alt_m = re.search(r'<img[^>]+alt=["\']([^"\']{5,})["\']', section)
-        if alt_m:
-            name = clean(alt_m.group(1))
-
-        if not name:
-            slug = prod_url.rstrip("/").split("/")[-1]
-            name = " ".join(w.capitalize() for w in slug.split("-"))
-
-        products[handle] = {
-            "handle"     : handle,
-            "name"       : name,
-            "url"        : prod_url,
-            "images"     : images,
-            "category"   : category_name,
-            "price"      : "",
-            "compare"    : "",
-            "sku"        : "",
-            "description": "",
-            "brand"      : "Factory Direct Flooring",
-            "stock"      : "active",
-            "tags"       : [category_name.lower().replace(" ","-")],
-        }
-
-    # ── Method 2: JSON-LD for prices, SKUs, descriptions ─────────────────────
-    json_blocks = re.findall(
-        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-        html, re.DOTALL
-    )
-
-    for block in json_blocks:
-        try:
-            data  = json.loads(block.strip())
-            items = data if isinstance(data, list) else [data]
-
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-
-                # Process ItemList
-                if item.get("@type") == "ItemList":
-                    for elem in item.get("itemListElement", []):
-                        _enrich_from_jsonld(elem.get("item", elem), products)
-                # Single product
-                elif item.get("@type") == "Product":
-                    _enrich_from_jsonld(item, products)
-
-        except Exception:
-            pass
-
-    # ── Method 3: price from HTML if still missing ────────────────────────────
-    # Find price blocks near product names
-    price_blocks = re.findall(
-        r'class="[^"]*price[^"]*"[^>]*>\s*£\s*([\d,]+\.?\d*)',
-        html
-    )
-    if price_blocks:
-        prices_list = [p.replace(",","") for p in price_blocks]
-        p_idx = 0
-        for h, prod in products.items():
-            if not prod["price"] and p_idx < len(prices_list):
-                prod["price"] = prices_list[p_idx]
-                p_idx += 1
-
-    return list(products.values())
-
-
-def _enrich_from_jsonld(item, products):
-    """Add price/sku/description from JSON-LD to existing product dict."""
-    if not isinstance(item, dict) or item.get("@type") != "Product":
-        return
-
-    url    = str(item.get("url", ""))
-    handle = make_handle(url.replace(BASE_URL+"/","")) if url else ""
-
-    if not handle:
-        return
-
-    # Create if not exists
-    if handle not in products:
-        name = clean(item.get("name",""))
-        if not name:
-            return
-        products[handle] = {
-            "handle": handle, "name": name, "url": url,
-            "images": [], "category": "", "price": "",
-            "compare": "", "sku": "", "description": "",
-            "brand": "Factory Direct Flooring",
-            "stock": "active", "tags": [],
-        }
-
-    p = products[handle]
-
-    # Name
-    if not p["name"]:
-        p["name"] = clean(item.get("name",""))
-
-    # SKU
-    if not p["sku"]:
-        p["sku"] = str(item.get("sku",""))
-
-    # Description
-    if not p["description"]:
-        p["description"] = clean(item.get("description",""))[:600]
-
-    # Brand
-    brand = item.get("brand",{})
-    if isinstance(brand, dict) and brand.get("name"):
-        p["brand"] = clean(brand["name"])
-    elif isinstance(brand, str) and brand:
-        p["brand"] = clean(brand)
-
-    # Price + stock
-    offers = item.get("offers",{})
-    if isinstance(offers, list): offers = offers[0] if offers else {}
-    if isinstance(offers, dict):
-        if not p["price"]:
-            p["price"] = str(offers.get("price", offers.get("lowPrice","")))
-        if not p["compare"]:
-            high = str(offers.get("highPrice",""))
-            if high and high != p["price"]:
-                p["compare"] = high
-        avail = str(offers.get("availability",""))
-        if avail:
-            p["stock"] = "active" if "InStock" in avail else "draft"
-
-    # Images — add CDN images from JSON-LD if we don't have any
-    if not p["images"]:
-        imgs = item.get("image",[])
-        if isinstance(imgs, str): imgs = [imgs]
-        if isinstance(imgs, dict): imgs = [imgs.get("url","")]
-        for img in imgs:
-            img = str(img).split("?")[0]
-            if is_real_image(img) and img not in p["images"]:
-                p["images"].append(img)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  STEP 3 — SCRAPE ALL CATEGORIES
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def scrape_all_categories(nav):
-    """Scrape every category page and collect all products."""
-    all_products = []
-    seen_handles = set()
-
-    # Build list of all category URLs to scrape
-    categories_to_scrape = []
-    for cat in nav.get("categories", []):
-        categories_to_scrape.append((cat["name"], cat["url"]))
-        for sub in cat.get("subcategories", []):
-            categories_to_scrape.append((sub["name"], sub["url"]))
-
-    # If no nav found, use hardcoded fallback
-    if not categories_to_scrape:
-        categories_to_scrape = [
-            ("Solid Wood Flooring",      f"{BASE_URL}/solid-wood-flooring"),
-            ("Engineered Wood Flooring", f"{BASE_URL}/engineered-wood-flooring"),
-            ("Laminate Flooring",        f"{BASE_URL}/laminate-flooring"),
-            ("LVT Flooring",             f"{BASE_URL}/lvt-flooring"),
-            ("Herringbone Flooring",     f"{BASE_URL}/herringbone-flooring"),
-            ("Vinyl Flooring",           f"{BASE_URL}/vinyl-flooring"),
-            ("Carpet",                   f"{BASE_URL}/carpet"),
-            ("Underlay",                 f"{BASE_URL}/underlay"),
-        ]
-
-    print(f"\n  Total categories to scrape: {len(categories_to_scrape)}")
-
-    for cat_name, cat_url in categories_to_scrape:
-        print(f"\n  [{cat_name}]")
+    for cat_name, base_url in CATEGORY_URLS:
         page    = 1
-        cur_url = cat_url
+        cur_url = base_url
+        cat_new = 0
 
         while True:
-            print(f"    Page {page}...", end=" ")
             html = fetch(cur_url)
             if not html:
-                print("✗ Failed")
                 break
 
-            products = extract_products_from_page(html, cat_name)
-
-            # Deduplicate globally
-            new = []
-            for p in products:
-                h = p["handle"]
-                if h and h not in seen_handles:
-                    seen_handles.add(h)
-                    new.append(p)
-
-            all_products.extend(new)
-            imgs = sum(1 for p in new if p["images"])
-            print(f"+{len(new)} products ({imgs} with images) | Total: {len(all_products)}")
-
-            if not new and page > 1:
-                break
-
-            # Next page detection
-            next_url = None
-            rel = re.search(
-                r'<link[^>]+rel=["\']next["\'][^>]+href=["\']([^"\']+)["\']', html
+            # Method 1: card-image links
+            card_urls = re.findall(
+                r'<div[^>]+class="[^"]*card-image[^"]*"[^>]*>.*?'
+                r'href=["\'](' + re.escape(BASE_URL) + r'/[a-z0-9][a-z0-9-]+)["\']',
+                html, re.DOTALL
             )
-            if rel:
-                nxt = rel.group(1)
-                next_url = nxt if nxt.startswith("http") else BASE_URL + nxt
+            for u in card_urls:
+                if u not in seen and is_product_url(u):
+                    seen.add(u)
+                    url_to_cat[u] = cat_name
+                    cat_new += 1
 
+            # Method 2: any product link on page
+            all_links = re.findall(
+                r'href=["\'](' + re.escape(BASE_URL) + r'/[a-z0-9][a-z0-9-]{4,})["\']',
+                html
+            )
+            for u in all_links:
+                if u not in seen and is_product_url(u):
+                    seen.add(u)
+                    url_to_cat[u] = cat_name
+                    cat_new += 1
+
+            # Next page
+            next_url = get_next_page(html, cur_url, page)
             if not next_url:
-                pg = re.search(
-                    r'href=["\']([^"\']*[?&]p=' + str(page+1) + r'[^"\']*)["\']', html
-                )
-                if pg:
-                    nxt = pg.group(1)
-                    next_url = nxt if nxt.startswith("http") else BASE_URL + nxt
-
-            if not next_url or next_url == cur_url:
                 break
-
             cur_url = next_url
             page   += 1
             time.sleep(DELAY)
 
-        time.sleep(DELAY)
+        print(f"  {cat_name}: {cat_new} URLs")
+
+    print(f"\n  ✓ Total: {len(url_to_cat)} unique product URLs")
+    return url_to_cat
+
+
+def is_product_url(url):
+    skip = [
+        "solid-wood-flooring","engineered-wood","laminate-flooring",
+        "lvt-flooring","herringbone-flooring","vinyl-flooring",
+        "/carpet","/underlay","/blog","/about","/contact","/advice",
+        "/faq","/account","/login","/register","/wishlist","/cart",
+        "/checkout","/search","/brand","/brands","?","#",".xml",
+    ]
+    path = url.replace(BASE_URL, "")
+    return not any(s in url for s in skip) and path.count("/") == 1
+
+
+def get_next_page(html, cur_url, page):
+    rel = re.search(r'<link[^>]+rel=["\']next["\'][^>]+href=["\']([^"\']+)["\']', html)
+    if rel:
+        nxt = rel.group(1)
+        return nxt if nxt.startswith("http") else BASE_URL + nxt
+
+    pg = re.search(r'href=["\']([^"\']*[?&]p=' + str(page+1) + r'[^"\']*)["\']', html)
+    if pg:
+        nxt = pg.group(1)
+        return nxt if nxt.startswith("http") else BASE_URL + nxt
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 2 — SCRAPE EACH PRODUCT PAGE (PARALLEL)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def scrape_product_page(url, category):
+    """
+    Visit one product page and extract ALL data.
+    Returns complete product dict.
+    """
+    html = fetch(url)
+    if not html:
+        return None
+
+    product = {
+        "url"        : url,
+        "handle"     : make_handle(url.replace(BASE_URL+"/", "")),
+        "category"   : category,
+        "name"       : "",
+        "sku"        : "",
+        "price"      : "",
+        "compare"    : "",
+        "description": "",
+        "brand"      : "Factory Direct Flooring",
+        "images"     : [],
+        "stock"      : "active",
+        "tags"       : [],
+    }
+
+    # ── 1. JSON-LD (most reliable — has everything) ───────────────────────────
+    json_blocks = re.findall(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html, re.DOTALL
+    )
+    for block in json_blocks:
+        try:
+            data  = json.loads(block.strip())
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("@type") != "Product":
+                    continue
+
+                # Name
+                if not product["name"]:
+                    product["name"] = clean(item.get("name", ""))
+
+                # SKU
+                if not product["sku"]:
+                    product["sku"] = str(item.get("sku", ""))
+
+                # Description
+                if not product["description"]:
+                    product["description"] = clean(item.get("description", ""))[:800]
+
+                # Brand
+                b = item.get("brand", {})
+                if isinstance(b, dict) and b.get("name"):
+                    product["brand"] = clean(b["name"])
+                elif isinstance(b, str) and b:
+                    product["brand"] = clean(b)
+
+                # Price + stock
+                offers = item.get("offers", {})
+                if isinstance(offers, list): offers = offers[0] if offers else {}
+                if isinstance(offers, dict):
+                    if not product["price"]:
+                        product["price"] = str(offers.get("price", ""))
+                    high = str(offers.get("highPrice", ""))
+                    if high and high != product["price"]:
+                        product["compare"] = high
+                    avail = str(offers.get("availability", ""))
+                    if avail:
+                        product["stock"] = "active" if "InStock" in avail else "draft"
+
+                # Images from JSON-LD
+                imgs = item.get("image", [])
+                if isinstance(imgs, str): imgs = [imgs]
+                if isinstance(imgs, dict): imgs = [imgs.get("url","")]
+                for img in imgs:
+                    img_clean = clean_img(str(img))
+                    if is_real_img(img_clean) and img_clean not in product["images"]:
+                        product["images"].append(img_clean)
+
+        except Exception:
+            pass
+
+    # ── 2. Extract ALL images from HTML (CDN only) ────────────────────────────
+    # This catches images not in JSON-LD
+    all_img_srcs = re.findall(
+        r'(?:src|data-src|data-lazy-src|data-original)=["\']([^"\']+)["\']',
+        html, re.IGNORECASE
+    )
+    for src in all_img_srcs:
+        src_clean = clean_img(src)
+        if is_real_img(src_clean) and src_clean not in product["images"]:
+            product["images"].append(src_clean)
+
+    # ── 3. HTML fallbacks if JSON-LD missing ──────────────────────────────────
+    if not product["name"]:
+        m = re.search(r'<h1[^>]*>.*?<span[^>]*>(.*?)</span>', html, re.DOTALL)
+        if m:
+            product["name"] = clean(m.group(1))
+        else:
+            slug = url.rstrip("/").split("/")[-1]
+            product["name"] = " ".join(w.capitalize() for w in slug.split("-"))
+
+    if not product["price"]:
+        m = re.search(r'£\s*([\d,]+\.?\d*)', html)
+        if m:
+            product["price"] = m.group(1).replace(",","")
+
+    if not product["description"]:
+        # Try meta description
+        m = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)', html)
+        if m:
+            product["description"] = clean(m.group(1))[:800]
+
+    if not product["sku"]:
+        # Try from HTML pattern
+        m = re.search(r'(?:SKU|Product Code|Ref)[^:]*:\s*([A-Z0-9-]{3,30})', html, re.IGNORECASE)
+        if m:
+            product["sku"] = m.group(1).strip()
+
+    # ── 4. Tags from meta keywords ────────────────────────────────────────────
+    mk = re.search(r'<meta[^>]+name=["\']keywords["\'][^>]+content=["\']([^"\']+)', html)
+    if mk:
+        product["tags"] = [t.strip() for t in mk.group(1).split(",") if t.strip()][:10]
+    if not product["tags"]:
+        product["tags"] = [category.lower().replace(" ","-")]
+
+    return product if product["name"] else None
+
+
+def scrape_all_products(url_to_cat):
+    """Scrape all product pages in parallel batches."""
+    all_products = []
+    urls         = list(url_to_cat.items())
+    total        = len(urls)
+    done         = 0
+    failed       = 0
+
+    print("\n" + "═"*62)
+    print(f"  STEP 2: Scraping {total} product pages ({THREADS} parallel)...")
+    print("═"*62)
+
+    # Process in batches to show progress
+    batch_size = 50
+    for batch_start in range(0, total, batch_size):
+        batch = urls[batch_start:batch_start + batch_size]
+
+        with ThreadPoolExecutor(max_workers=THREADS) as executor:
+            futures = {
+                executor.submit(scrape_product_page, url, cat): url
+                for url, cat in batch
+            }
+            for future in as_completed(futures):
+                done += 1
+                try:
+                    result = future.result()
+                    if result:
+                        all_products.append(result)
+                    else:
+                        failed += 1
+                except Exception:
+                    failed += 1
+
+        imgs   = sum(1 for p in all_products if p["images"])
+        priced = sum(1 for p in all_products if p["price"])
+        print(f"  Progress: {done}/{total} | Found: {len(all_products)} | "
+              f"With images: {imgs} | Priced: {priced} | Failed: {failed}")
+
+        time.sleep(0.5)
 
     return all_products
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  STEP 4 — SAVE ALL OUTPUT FILES
+# STEP 3 — NAVIGATION STRUCTURE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def save_shopify_products_csv(products):
-    """Save official Shopify product import CSV."""
-    rows = []
+def scrape_navigation():
+    """Get full nav structure from homepage."""
+    print("\n" + "═"*62)
+    print("  STEP 3: Scraping navigation structure...")
+    print("═"*62)
 
-    for p in products:
-        name    = p.get("name","")
-        if not name:
+    html = fetch(BASE_URL)
+    nav  = {"site": BASE_URL, "scraped_at": datetime.now().isoformat(), "categories": []}
+
+    if not html:
+        return nav
+
+    # Find all nav links
+    seen_urls = set()
+    links = re.findall(
+        r'href=["\'](' + re.escape(BASE_URL) + r'/[a-z0-9][a-z0-9-]+/?)["\'][^>]*>\s*([^<]{2,50})\s*</a>',
+        html, re.IGNORECASE
+    )
+
+    skip = ["blog","about","contact","advice","faq","account",
+            "login","register","wishlist","cart","checkout","search"]
+
+    for url, name in links:
+        url  = url.rstrip("/")
+        name = clean(name)
+        if not name or url in seen_urls:
+            continue
+        if any(s in url for s in skip):
+            continue
+        if url.replace(BASE_URL,"").count("/") != 1:
             continue
 
+        seen_urls.add(url)
+        nav["categories"].append({
+            "name"  : name,
+            "url"   : url,
+            "handle": make_handle(name),
+            "slug"  : url.replace(BASE_URL+"/",""),
+        })
+
+    print(f"  ✓ Found {len(nav['categories'])} navigation categories")
+    return nav
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 4 — SAVE ALL OUTPUT FILES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def save_products_csv(products):
+    rows = []
+    for p in products:
+        name   = p.get("name","")
+        if not name: continue
+
         handle  = p.get("handle","") or make_handle(name)
+        cat     = p.get("category","Flooring")
         body    = p.get("description","") or ""
-        if body and not body.startswith("<"):
+        if body and not body.strip().startswith("<"):
             body = f"<p>{body}</p>"
 
-        cat     = p.get("category","Flooring")
         vendor  = p.get("brand","") or "Factory Direct Flooring"
-        sh_cat  = get_shopify_category(cat)
-        tags    = ", ".join(p.get("tags",[cat.lower().replace(" ","-")]))
-        images  = [i for i in p.get("images",[]) if is_real_image(i)]
+        sh_cat  = get_shopify_cat(cat)
+        tags    = ", ".join(p.get("tags",[]))
+        images  = [i for i in p.get("images",[]) if is_real_img(i)]
         status  = p.get("stock","active")
         price   = norm_price(p.get("price","")) or "0.00"
         compare = norm_price(p.get("compare",""))
         sku     = p.get("sku","")
         first   = images[0] if images else ""
 
-        # Main row
         rows.append({
             "Handle"                    : handle,
             "Title"                     : name,
@@ -576,99 +492,100 @@ def save_shopify_products_csv(products):
         for i, img in enumerate(images[1:], 2):
             blank = {k:"" for k in SHOPIFY_PRODUCT_COLS}
             blank.update({
-                "Handle"        : handle,
-                "Image Src"     : img,
-                "Image Position": str(i),
-                "Image Alt Text": name,
+                "Handle": handle, "Image Src": img,
+                "Image Position": str(i), "Image Alt Text": name,
             })
             rows.append(blank)
 
     fname = f"{OUTPUT_DIR}/factory_shopify_products_{TIMESTAMP}.csv"
     with open(fname, "w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=SHOPIFY_PRODUCT_COLS, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
+        csv.DictWriter(f, fieldnames=SHOPIFY_PRODUCT_COLS, extrasaction="ignore").writeheader()
+        csv.DictWriter(f, fieldnames=SHOPIFY_PRODUCT_COLS, extrasaction="ignore").writerows(rows)
 
-    print(f"  ✓ Products CSV    → {fname}  ({len(products)} products, {len(rows)} rows)")
+    print(f"  ✓ Products CSV      → {fname}  ({len(products)} products / {len(rows)} rows)")
     return fname
 
 
-def save_shopify_collections_csv(nav):
-    """Save Shopify collections (categories) import CSV."""
-    rows = []
+def save_collections_csv(nav, products):
+    rows     = []
+    cat_seen = set()
 
-    for cat in nav.get("categories", []):
-        handle = cat.get("handle","") or make_handle(cat["name"])
-        rows.append({
-            "Handle"        : handle,
-            "Title"         : cat["name"],
-            "Body (HTML)"   : f"<p>Browse our range of {cat['name']}.</p>",
-            "Published"     : "TRUE",
-            "Image Src"     : "",
-            "Image Alt Text": cat["name"],
-            "Sort Order"    : "best-selling",
-            "Template Suffix": "",
-            "Updated At"    : datetime.now().strftime("%Y-%m-%d"),
-        })
-
-        # Subcategories as collections too
-        for sub in cat.get("subcategories", []):
-            sub_handle = sub.get("handle","") or make_handle(sub["name"])
+    # From navigation
+    for cat in nav.get("categories",[]):
+        h = cat.get("handle","")
+        if h and h not in cat_seen:
+            cat_seen.add(h)
             rows.append({
-                "Handle"        : sub_handle,
-                "Title"         : sub["name"],
-                "Body (HTML)"   : f"<p>Browse our range of {sub['name']}.</p>",
-                "Published"     : "TRUE",
-                "Image Src"     : "",
-                "Image Alt Text": sub["name"],
-                "Sort Order"    : "best-selling",
-                "Template Suffix": "",
-                "Updated At"    : datetime.now().strftime("%Y-%m-%d"),
+                "Handle"      : h,
+                "Title"       : cat["name"],
+                "Body (HTML)" : f"<p>Browse our full range of {cat['name']}.</p>",
+                "Published"   : "TRUE",
+                "Image Src"   : "",
+                "Image Alt Text": cat["name"],
+                "Sort Order"  : "best-selling",
+                "Updated At"  : datetime.now().strftime("%Y-%m-%d"),
+            })
+
+    # From product categories (catch any not in nav)
+    for p in products:
+        cat  = p.get("category","")
+        h    = make_handle(cat)
+        if cat and h and h not in cat_seen:
+            cat_seen.add(h)
+            rows.append({
+                "Handle"      : h,
+                "Title"       : cat,
+                "Body (HTML)" : f"<p>Browse our full range of {cat}.</p>",
+                "Published"   : "TRUE",
+                "Image Src"   : "",
+                "Image Alt Text": cat,
+                "Sort Order"  : "best-selling",
+                "Updated At"  : datetime.now().strftime("%Y-%m-%d"),
             })
 
     fname = f"{OUTPUT_DIR}/factory_shopify_collections_{TIMESTAMP}.csv"
     with open(fname, "w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=SHOPIFY_COLLECTION_COLS, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
+        csv.DictWriter(f, fieldnames=SHOPIFY_COLLECTION_COLS, extrasaction="ignore").writeheader()
+        csv.DictWriter(f, fieldnames=SHOPIFY_COLLECTION_COLS, extrasaction="ignore").writerows(rows)
 
-    print(f"  ✓ Collections CSV → {fname}  ({len(rows)} collections)")
+    print(f"  ✓ Collections CSV   → {fname}  ({len(rows)} collections)")
     return fname
 
 
-def save_json_backup(products, nav):
-    """Save complete raw data as JSON."""
-    backup = {
-        "scraped_at"   : datetime.now().isoformat(),
-        "source"       : BASE_URL,
-        "total_products": len(products),
-        "navigation"   : nav.get("categories", []),
-        "products"     : [{
-            "name"       : p["name"],
-            "handle"     : p["handle"],
-            "sku"        : p["sku"],
-            "price"      : p["price"],
-            "compare"    : p["compare"],
-            "brand"      : p["brand"],
-            "category"   : p["category"],
-            "stock"      : p["stock"],
-            "description": p["description"],
-            "images"     : p["images"],
-            "url"        : p["url"],
-            "tags"       : p["tags"],
-        } for p in products],
-    }
-
-    fname = f"{OUTPUT_DIR}/factory_all_products_{TIMESTAMP}.json"
+def save_navigation_json(nav):
+    fname = f"{OUTPUT_DIR}/factory_navigation_{TIMESTAMP}.json"
     with open(fname, "w", encoding="utf-8") as f:
-        json.dump(backup, f, ensure_ascii=False, indent=2)
+        json.dump(nav, f, ensure_ascii=False, indent=2)
+    print(f"  ✓ Navigation JSON   → {fname}")
+    return fname
 
-    print(f"  ✓ JSON backup     → {fname}")
+
+def save_products_json(products):
+    fname = f"{OUTPUT_DIR}/factory_all_products_{TIMESTAMP}.json"
+    data  = []
+    for p in products:
+        data.append({
+            "name"        : p["name"],
+            "handle"      : p["handle"],
+            "sku"         : p["sku"],
+            "price"       : p["price"],
+            "compare_price": p["compare"],
+            "brand"       : p["brand"],
+            "category"    : p["category"],
+            "stock"       : p["stock"],
+            "description" : p["description"],
+            "tags"        : p["tags"],
+            "images"      : p["images"],
+            "url"         : p["url"],
+        })
+    with open(fname, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    print(f"  ✓ Products JSON     → {fname}")
     return fname
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  MAIN
+# MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def main():
@@ -678,51 +595,53 @@ def main():
     print("\n" + "═"*62)
     print("  COMPLETE WEBSITE SCRAPER")
     print(f"  {BASE_URL}")
-    print("  Scraping: Navigation + Categories + Products + Images")
     print("═"*62)
 
-    # ── Step 1: Navigation ────────────────────────────────────────────────────
-    nav = scrape_navigation()
+    # Step 1 — Collect URLs
+    url_to_cat = collect_product_urls()
 
-    # ── Step 2 & 3: All Products ──────────────────────────────────────────────
-    print("\n" + "─"*62)
-    print("  STEP 2 & 3: Scraping all category pages...")
-    print("─"*62)
-    products = scrape_all_categories(nav)
-
-    if not products:
-        print("\n  ⚠ No products found")
+    if not url_to_cat:
+        print("  No URLs found!")
         return
 
-    # ── Step 4: Save outputs ──────────────────────────────────────────────────
-    print("\n" + "─"*62)
-    print("  STEP 4: Saving output files...")
-    print("─"*62)
+    # Step 2 — Scrape all product pages
+    products = scrape_all_products(url_to_cat)
 
-    products_csv    = save_shopify_products_csv(products)
-    collections_csv = save_shopify_collections_csv(nav)
-    json_file       = save_json_backup(products, nav)
+    if not products:
+        print("  No products scraped!")
+        return
 
-    # ── Summary ───────────────────────────────────────────────────────────────
+    # Step 3 — Navigation
+    nav = scrape_navigation()
+
+    # Step 4 — Save outputs
+    print("\n" + "═"*62)
+    print("  SAVING OUTPUT FILES...")
+    print("═"*62)
+
+    save_products_csv(products)
+    save_collections_csv(nav, products)
+    save_navigation_json(nav)
+    save_products_json(products)
+
+    # Summary
     elapsed  = round(time.time() - start)
-    with_img = sum(1 for p in products if any(is_real_image(i) for i in p.get("images",[])))
+    with_img = sum(1 for p in products if any(is_real_img(i) for i in p.get("images",[])))
     priced   = sum(1 for p in products if norm_price(p.get("price","")))
-    cats     = len(set(p["category"] for p in products))
+    with_desc= sum(1 for p in products if p.get("description"))
+    with_sku = sum(1 for p in products if p.get("sku"))
 
     print(f"\n{'═'*62}")
-    print(f"  ✅ COMPLETE SCRAPE DONE in {elapsed//60}m {elapsed%60}s")
+    print(f"  ✅ DONE in {elapsed//60}m {elapsed%60}s")
     print(f"{'─'*62}")
-    print(f"  Total products    : {len(products)}")
-    print(f"  With real images  : {with_img}")
-    print(f"  With prices       : {priced}")
-    print(f"  Categories found  : {cats}")
-    print(f"\n  OUTPUT FILES:")
-    print(f"  📦 {products_csv}")
-    print(f"  📁 {collections_csv}")
-    print(f"  💾 {json_file}")
-    print(f"\n  HOW TO IMPORT TO SHOPIFY:")
-    print(f"  1. Products → Import → factory_shopify_products_*.csv")
-    print(f"  2. Products → Collections → Import → factory_shopify_collections_*.csv")
+    print(f"  Total products   : {len(products)}")
+    print(f"  With images      : {with_img}")
+    print(f"  With prices      : {priced}")
+    print(f"  With description : {with_desc}")
+    print(f"  With SKU         : {with_sku}")
+    print(f"\n  SHOPIFY IMPORT:")
+    print(f"  1. Products   → factory_shopify_products_*.csv")
+    print(f"  2. Collections→ factory_shopify_collections_*.csv")
     print("═"*62)
 
 
