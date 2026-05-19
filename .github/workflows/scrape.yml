@@ -1,4 +1,4 @@
-name: Complete Website Scraper
+name: Factory Flooring Scraper
 
 on:
   workflow_dispatch:
@@ -6,10 +6,9 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 25
     permissions:
       contents: write
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -19,22 +18,19 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install
         run: pip install requests
 
-      - name: Run complete scraper
-        timeout-minutes: 50
+      - name: Run scraper
         run: |
           cd scrapers
           python scraper_factoryflooring_shopify.py
-          echo "=== Output files ==="
           ls -la output/
 
-      - name: Push all output files
+      - name: Push
         run: |
           git config user.name "bot"
           git config user.email "bot@bot.com"
-          git pull origin main --rebase || true
           git add scrapers/output/
-          git diff --staged --quiet || git commit -m "Complete scrape $(date '+%Y-%m-%d')"
+          git diff --staged --quiet || git commit -m "factory flooring $(date '+%Y-%m-%d')"
           git push origin main
