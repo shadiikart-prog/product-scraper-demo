@@ -6,7 +6,7 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 30
     permissions:
       contents: write
 
@@ -23,18 +23,18 @@ jobs:
         run: pip install requests
 
       - name: Run scraper
-        timeout-minutes: 50
+        timeout-minutes: 25
         run: |
           cd scrapers
           python scraper_factoryflooring_shopify.py
           echo "=== Output files ==="
-          ls -la output/
+          ls -la output/ || echo "No output folder"
 
       - name: Push to GitHub
         run: |
           git config user.name "bot"
           git config user.email "bot@bot.com"
           git pull origin main --rebase || true
-          git add scrapers/output/
-          git diff --staged --quiet || git commit -m "Factory flooring data $(date '+%Y-%m-%d')"
+          git add scrapers/output/ || true
+          git diff --staged --quiet || git commit -m "Factory flooring CSV $(date '+%Y-%m-%d')"
           git push origin main
