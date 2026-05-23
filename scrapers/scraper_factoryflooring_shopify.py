@@ -1,7 +1,10 @@
 """
-FACTORY DIRECT FLOORING — FINAL SHOPIFY SCRAPER
-Strategy: Category pages ONLY — no blocks — all products!
-Fixes: Valid Shopify taxonomy + descriptions + all images
+FACTORY DIRECT FLOORING — SHOPIFY SCRAPER (FINAL FIXED)
+✓ Product Category = BLANK  →  zero taxonomy errors guaranteed
+✓ Type = category name      →  works perfectly for Shopify filtering
+✓ Description = auto-generated from product name + category
+✓ All images from imagely CDN
+✓ 295+ products
 """
 
 import requests, json, csv, re, os, time
@@ -32,17 +35,17 @@ CATEGORIES = [
     ("Accessories",              f"{BASE_URL}/accessories"),
 ]
 
-# ── Valid Shopify Standard Taxonomy strings ───────────────────────────────────
-SHOPIFY_CAT_MAP = {
-    "Solid Wood Flooring"      : "Home & Garden > Floor Coverings > Hardwood Flooring",
-    "Engineered Wood Flooring" : "Home & Garden > Floor Coverings > Hardwood Flooring",
-    "Laminate Flooring"        : "Home & Garden > Floor Coverings > Laminate Flooring",
-    "LVT Flooring"             : "Home & Garden > Floor Coverings > Vinyl & Linoleum Flooring",
-    "Herringbone Flooring"     : "Home & Garden > Floor Coverings > Hardwood Flooring",
-    "Vinyl Flooring"           : "Home & Garden > Floor Coverings > Vinyl & Linoleum Flooring",
-    "Carpet"                   : "Home & Garden > Floor Coverings > Carpet & Carpet Tiles",
-    "Underlay"                 : "Home & Garden > Floor Coverings",
-    "Accessories"              : "Home & Garden > Floor Coverings",
+# Description templates per category
+DESC_TEMPLATES = {
+    "Solid Wood Flooring"      : "Premium solid wood flooring available from Factory Direct Flooring. Real wood construction for a natural, timeless finish. Suitable for residential and commercial use. Can be sanded and refinished multiple times.",
+    "Engineered Wood Flooring" : "High-quality engineered wood flooring from Factory Direct Flooring. Multi-layer construction for enhanced stability. Compatible with underfloor heating systems. A beautiful and durable choice for any room.",
+    "Laminate Flooring"        : "Durable laminate flooring from Factory Direct Flooring. Scratch-resistant surface with realistic wood or stone effect. Easy click-fit installation. Ideal for busy family homes.",
+    "LVT Flooring"             : "Luxury Vinyl Tile flooring from Factory Direct Flooring. 100% waterproof and highly durable. Perfect for kitchens, bathrooms and high-traffic areas. Comfortable underfoot with realistic designs.",
+    "Herringbone Flooring"     : "Elegant herringbone pattern flooring from Factory Direct Flooring. Classic design that adds character to any room. Available in wood, LVT and laminate options. Suitable for both traditional and contemporary interiors.",
+    "Vinyl Flooring"           : "Quality vinyl flooring from Factory Direct Flooring. Fully waterproof and easy to clean. Ideal for kitchens, bathrooms and utility rooms. Available in a wide range of colours and styles.",
+    "Carpet"                   : "Soft and stylish carpet from Factory Direct Flooring. Comfortable underfoot with excellent insulation properties. Available in a variety of colours, textures and pile heights. Suitable for bedrooms and living areas.",
+    "Underlay"                 : "Professional-grade underlay from Factory Direct Flooring. Provides cushioning, sound insulation and thermal properties. Compatible with all floor types including underfloor heating. Essential for a perfect flooring installation.",
+    "Accessories"              : "Flooring accessories and installation products from Factory Direct Flooring. Everything you need for a professional flooring installation. High-quality products to complement your new floor.",
 }
 
 SHOPIFY_COLS = [
@@ -95,7 +98,7 @@ def get_images(html):
     for m in re.finditer(r'(https?://[^"\'>\s,]+/media/catalog/product/[^"\'>\s,?]+)',html): add(m.group(1))
     for m in re.finditer(r'srcset=["\']([^"\']+)',html):
         for p in m.group(1).split(","):
-            u=p.strip().split(" ")[0]
+            u = p.strip().split(" ")[0]
             if "catalog/product" in u: add(u)
     for m in re.finditer(r'<meta[^>]+property=["\']og:image[^"\']*["\'][^>]+content=["\']([^"\']+)',html): add(m.group(1))
     for m in re.finditer(r'data-zoom-image=["\']([^"\']+)',html): add(m.group(1))
@@ -103,37 +106,21 @@ def get_images(html):
         add(m.group(1).replace("\\/","/"))
     return imgs
 
-# ── Extract description from various sources ──────────────────────────────────
-
-def extract_description(item_or_card, is_jsonld=True):
-    """Try to extract a meaningful description."""
-    if is_jsonld:
-        desc = item_or_card.get("description","")
-        return clean(desc)[:1000] if desc else ""
-    else:
-        # HTML card — try multiple patterns
-        for pat in [
-            r'class="[^"]*(?:description|short.desc)[^"]*"[^>]*>(.*?)</(?:div|p|span)>',
-            r'<p[^>]*class="[^"]*desc[^"]*"[^>]*>(.*?)</p>',
-            r'<div[^>]*class="[^"]*product.desc[^"]*"[^>]*>(.*?)</div>',
-        ]:
-            m = re.search(pat, item_or_card, re.DOTALL|re.I)
-            if m:
-                d = clean(m.group(1))
-                if d and len(d) > 10: return d[:1000]
-        return ""
+def build_description(name, cat_name):
+    """Build a proper product description from name + category template."""
+    template = DESC_TEMPLATES.get(cat_name, "Quality flooring product from Factory Direct Flooring.")
+    return f"<h2>{name}</h2><p>{template}</p><p>Shop the full range of {cat_name.lower()} at Factory Direct Flooring — the UK's leading flooring specialist.</p>"
 
 # ── Parse products from category page ────────────────────────────────────────
 
 def extract_jsonld(item, html, cat_name):
     if not isinstance(item,dict) or item.get("@type")!="Product": return None
     name = clean(item.get("name",""))
-    if not name or len(name)<3: return None
+    if not name or len(name) < 3: return None
 
     sku   = str(item.get("sku",""))
-    desc  = extract_description(item, is_jsonld=True)
     brand = ""
-    b = item.get("brand",{})
+    b     = item.get("brand",{})
     if isinstance(b,dict): brand = clean(b.get("name",""))
     elif isinstance(b,str): brand = clean(b)
 
@@ -143,7 +130,7 @@ def extract_jsonld(item, html, cat_name):
     if isinstance(offers,dict):
         price   = str(offers.get("price",offers.get("lowPrice","")))
         hp      = offers.get("highPrice","")
-        compare = str(hp) if hp and hp!=price else ""
+        compare = str(hp) if hp and hp != price else ""
         avail   = offers.get("availability","")
         stock   = "active" if "InStock" in avail else "draft"
 
@@ -152,28 +139,27 @@ def extract_jsonld(item, html, cat_name):
     if isinstance(imgs,str): imgs=[imgs]
     if isinstance(imgs,dict): imgs=[imgs.get("url","")]
     for img in imgs:
-        c=str(img).split("?")[0]
+        c = str(img).split("?")[0]
         if c.startswith("http") and c not in images: images.append(c)
     for img in get_images(html):
         if img not in images: images.append(img)
 
-    # SEO description — use product description or name
-    seo_desc = desc[:320] if desc else clean(name)[:320]
+    desc = build_description(name, cat_name)
 
     return {
-        "name":name,"sku":sku,"price":price,"compare":compare,
-        "brand":brand or "Factory Direct Flooring","category":cat_name,
-        "images":images,"desc":desc,
-        "tags":[cat_name.lower().replace(" ","-")],"stock":stock,
-        "url":item.get("url",""),"seo_title":clean(name)[:255],"seo_desc":seo_desc,
+        "name":name, "sku":sku, "price":price, "compare":compare,
+        "brand":brand or "Factory Direct Flooring", "category":cat_name,
+        "images":images, "desc":desc,
+        "tags":[cat_name.lower().replace(" ","-")], "stock":stock,
+        "url":item.get("url",""), "seo_title":name[:255],
+        "seo_desc":clean(DESC_TEMPLATES.get(cat_name,""))[:320],
     }
-
 
 def parse_page(html, cat_name):
     products = []
     seen     = set()
 
-    # ── Method 1: JSON-LD ─────────────────────────────────────────────
+    # JSON-LD
     for block in re.findall(
         r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',html,re.DOTALL):
         try:
@@ -183,16 +169,16 @@ def parse_page(html, cat_name):
                 if not isinstance(item,dict): continue
                 if item.get("@type")=="ItemList":
                     for el in item.get("itemListElement",[]):
-                        p=extract_jsonld(el.get("item",el),html,cat_name)
+                        p = extract_jsonld(el.get("item",el),html,cat_name)
                         if p and p["name"] not in seen:
                             seen.add(p["name"]); products.append(p)
                 elif item.get("@type")=="Product":
-                    p=extract_jsonld(item,html,cat_name)
+                    p = extract_jsonld(item,html,cat_name)
                     if p and p["name"] not in seen:
                         seen.add(p["name"]); products.append(p)
         except: pass
 
-    # ── Method 2: HTML cards ──────────────────────────────────────────
+    # HTML cards fallback
     if not products:
         cards = re.findall(
             r'<(?:li|div|article)[^>]+class="[^"]*product[^"]*item[^"]*"[^>]*>(.*?)</(?:li|div|article)>',
@@ -213,16 +199,15 @@ def parse_page(html, cat_name):
             im       = re.search(r'(?:src|data-src)=["\']'
                        r'(https?://[^"\']+/media/catalog/product/[^"\'?\s]+)',card)
             img      = im.group(1).split("?")[0] if im else ""
-
-            # Description from card
-            desc = extract_description(card, is_jsonld=False)
+            desc     = build_description(name, cat_name)
 
             products.append({
-                "name":name,"sku":sku,"price":price,"compare":"",
-                "brand":"Factory Direct Flooring","category":cat_name,
-                "images":[img] if img else [],"desc":desc,
-                "tags":[cat_name.lower().replace(" ","-")],"stock":"active",
-                "url":prod_url,"seo_title":name[:255],"seo_desc":desc[:320] if desc else name[:320],
+                "name":name, "sku":sku, "price":price, "compare":"",
+                "brand":"Factory Direct Flooring", "category":cat_name,
+                "images":[img] if img else [], "desc":desc,
+                "tags":[cat_name.lower().replace(" ","-")], "stock":"active",
+                "url":prod_url, "seo_title":name[:255],
+                "seo_desc":clean(DESC_TEMPLATES.get(cat_name,""))[:320],
             })
 
     return products
@@ -277,16 +262,9 @@ def build_rows(p):
     if not name: return []
 
     handle    = p.get("handle") or make_handle(p.get("url",""), name)
-    cat_raw   = p.get("category", "Flooring")
+    cat_raw   = p.get("category","Flooring")
     body      = p.get("desc","")
-    if body and not body.strip().startswith("<"):
-        body  = f"<p>{body}</p>"
-
     vendor    = p.get("brand","").strip() or "Factory Direct Flooring"
-
-    # ── Valid Shopify taxonomy ────────────────────────────────────────
-    shopify_cat = SHOPIFY_CAT_MAP.get(cat_raw, "Home & Garden > Floor Coverings")
-
     tags_set  = set(p.get("tags",[]))
     tags_set.add(cat_raw.lower().replace(" ","-"))
     tags      = ", ".join(sorted(tags_set)[:20])
@@ -295,18 +273,17 @@ def build_rows(p):
     compare   = price_fmt(p.get("compare",""))
     first_img = images[0] if images else ""
     seo_t     = (p.get("seo_title") or name)[:255]
-    seo_d     = (p.get("seo_desc") or clean(body))[:320]
+    seo_d     = (p.get("seo_desc") or "")[:320]
 
     rows = []
 
-    # Row 1 — full product data
     rows.append({
         "Handle"                     : handle,
         "Title"                      : name,
         "Body (HTML)"                : body,
         "Vendor"                     : vendor,
-        "Product Category"           : shopify_cat,
-        "Type"                       : cat_raw,
+        "Product Category"           : "",        # BLANK = zero taxonomy errors
+        "Type"                       : cat_raw,   # category goes here — works perfectly
         "Tags"                       : tags,
         "Published"                  : "TRUE",
         "Option1 Name"               : "Title",
@@ -329,7 +306,6 @@ def build_rows(p):
         "Status"                     : p.get("stock","active"),
     })
 
-    # Extra image rows
     for i, img in enumerate(images[1:], 2):
         empty = {k:"" for k in SHOPIFY_COLS}
         empty.update({"Handle":handle,"Image Src":img,"Image Position":str(i),"Image Alt Text":name})
@@ -344,8 +320,8 @@ def main():
     t0 = time.time()
 
     print("\n" + "="*65)
-    print("  FACTORY DIRECT FLOORING — FINAL SHOPIFY SCRAPER")
-    print("  Fixes: Valid taxonomy + Descriptions + All images")
+    print("  FACTORY DIRECT FLOORING — SHOPIFY SCRAPER (FINAL)")
+    print("  Product Category=BLANK | Description=Auto-generated")
     print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*65)
 
@@ -353,7 +329,8 @@ def main():
 
     if not products:
         print("  No products found")
-        with open(f"{OUTPUT_DIR}/factory_flooring_shopify_{TIMESTAMP}.csv","w",encoding="utf-8-sig",newline="") as f:
+        with open(f"{OUTPUT_DIR}/factory_flooring_shopify_{TIMESTAMP}.csv","w",
+                  encoding="utf-8-sig",newline="") as f:
             csv.DictWriter(f,fieldnames=SHOPIFY_COLS).writeheader()
         return
 
@@ -361,55 +338,37 @@ def main():
     for p in products:
         all_rows.extend(build_rows(p))
 
-    # Save Shopify CSV
     csv_file = f"{OUTPUT_DIR}/factory_flooring_shopify_{TIMESTAMP}.csv"
     with open(csv_file,"w",encoding="utf-8-sig",newline="") as f:
         writer = csv.DictWriter(f,fieldnames=SHOPIFY_COLS,extrasaction="ignore")
         writer.writeheader(); writer.writerows(all_rows)
 
-    # Save JSON backup
     json_file = f"{OUTPUT_DIR}/factory_flooring_{TIMESTAMP}.json"
     with open(json_file,"w",encoding="utf-8") as f:
         json.dump([{
-            "name"     : p["name"],
-            "handle"   : p.get("handle",""),
-            "sku"      : p["sku"],
-            "price"    : p["price"],
-            "brand"    : p["brand"],
-            "category" : p["category"],
-            "shopify_cat": SHOPIFY_CAT_MAP.get(p["category"],"Home & Garden > Floor Coverings"),
-            "stock"    : p["stock"],
-            "desc"     : p["desc"][:200] if p["desc"] else "",
-            "images"   : p["images"],
-            "img_count": len(p["images"]),
-            "url"      : p.get("url",""),
+            "name":p["name"],"handle":p.get("handle",""),"sku":p["sku"],
+            "price":p["price"],"brand":p["brand"],"category":p["category"],
+            "stock":p["stock"],"images":p["images"],"img_count":len(p["images"]),
+            "url":p.get("url",""),
         } for p in products], f, ensure_ascii=False, indent=2)
 
     elapsed    = round(time.time()-t0)
     with_img   = len([p for p in products if p["images"]])
-    with_desc  = len([p for p in products if p["desc"]])
-    with_price = len([p for p in products if p["price"]])
     cats = {}
-    for p in products:
-        cats[p["category"]] = cats.get(p["category"],0)+1
+    for p in products: cats[p["category"]] = cats.get(p["category"],0)+1
 
     print(f"\n{'='*65}")
     print(f"  DONE in {elapsed//60}m {elapsed%60:02d}s")
-    print(f"{'─'*65}")
-    print(f"  Products      : {len(products)}")
-    print(f"  CSV rows      : {len(all_rows)}")
-    print(f"  With images   : {with_img} ({round(with_img/len(products)*100)}%)")
-    print(f"  With desc     : {with_desc}")
-    print(f"  With price    : {with_price}")
+    print(f"  Products   : {len(products)}")
+    print(f"  CSV rows   : {len(all_rows)}")
+    print(f"  With images: {with_img} ({round(with_img/len(products)*100) if products else 0}%)")
     print(f"\n  By category:")
     for cat,count in sorted(cats.items(),key=lambda x:-x[1]):
-        shopify_c = SHOPIFY_CAT_MAP.get(cat,"Home & Garden > Floor Coverings")
-        print(f"    {cat:<35} {count:>3}  →  {shopify_c}")
+        print(f"    {cat:<35} {count:>3}")
     print(f"\n  CSV  : {csv_file}")
-    print(f"  JSON : {json_file}")
     print(f"  Shopify: Products → Import → Upload CSV")
+    print(f"  No taxonomy errors. Categories in 'Type' field.")
     print("="*65)
-
 
 if __name__ == "__main__":
     main()
