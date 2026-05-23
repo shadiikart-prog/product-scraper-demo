@@ -1,10 +1,10 @@
 """
-FACTORY DIRECT FLOORING — SHOPIFY SCRAPER (FINAL FIXED)
-✓ Product Category = BLANK  →  zero taxonomy errors guaranteed
-✓ Type = category name      →  works perfectly for Shopify filtering
-✓ Description = auto-generated from product name + category
-✓ All images from imagely CDN
-✓ 295+ products
+FACTORY DIRECT FLOORING — FINAL CLEAN SHOPIFY SCRAPER
+✓ Max 3 images per product (only product-specific, no mixing)
+✓ Auto-generated descriptions
+✓ Type = category (for Smart Collections)
+✓ Product Category = blank (zero taxonomy errors)
+✓ Clean CSV — no raw data overflow
 """
 
 import requests, json, csv, re, os, time
@@ -14,6 +14,7 @@ from html import unescape
 BASE_URL   = "https://www.factory-direct-flooring.co.uk"
 OUTPUT_DIR = "output"
 TIMESTAMP  = datetime.now().strftime("%Y%m%d_%H%M%S")
+MAX_IMAGES = 3  # Max images per product
 
 HEADERS = {
     "User-Agent"      : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -35,17 +36,16 @@ CATEGORIES = [
     ("Accessories",              f"{BASE_URL}/accessories"),
 ]
 
-# Description templates per category
 DESC_TEMPLATES = {
-    "Solid Wood Flooring"      : "Premium solid wood flooring available from Factory Direct Flooring. Real wood construction for a natural, timeless finish. Suitable for residential and commercial use. Can be sanded and refinished multiple times.",
-    "Engineered Wood Flooring" : "High-quality engineered wood flooring from Factory Direct Flooring. Multi-layer construction for enhanced stability. Compatible with underfloor heating systems. A beautiful and durable choice for any room.",
-    "Laminate Flooring"        : "Durable laminate flooring from Factory Direct Flooring. Scratch-resistant surface with realistic wood or stone effect. Easy click-fit installation. Ideal for busy family homes.",
-    "LVT Flooring"             : "Luxury Vinyl Tile flooring from Factory Direct Flooring. 100% waterproof and highly durable. Perfect for kitchens, bathrooms and high-traffic areas. Comfortable underfoot with realistic designs.",
-    "Herringbone Flooring"     : "Elegant herringbone pattern flooring from Factory Direct Flooring. Classic design that adds character to any room. Available in wood, LVT and laminate options. Suitable for both traditional and contemporary interiors.",
-    "Vinyl Flooring"           : "Quality vinyl flooring from Factory Direct Flooring. Fully waterproof and easy to clean. Ideal for kitchens, bathrooms and utility rooms. Available in a wide range of colours and styles.",
-    "Carpet"                   : "Soft and stylish carpet from Factory Direct Flooring. Comfortable underfoot with excellent insulation properties. Available in a variety of colours, textures and pile heights. Suitable for bedrooms and living areas.",
-    "Underlay"                 : "Professional-grade underlay from Factory Direct Flooring. Provides cushioning, sound insulation and thermal properties. Compatible with all floor types including underfloor heating. Essential for a perfect flooring installation.",
-    "Accessories"              : "Flooring accessories and installation products from Factory Direct Flooring. Everything you need for a professional flooring installation. High-quality products to complement your new floor.",
+    "Solid Wood Flooring"      : "Premium solid wood flooring from Factory Direct Flooring. Real wood construction for a natural, timeless finish. Suitable for residential and commercial use. Can be sanded and refinished multiple times for a lasting floor.",
+    "Engineered Wood Flooring" : "High-quality engineered wood flooring from Factory Direct Flooring. Multi-layer construction for enhanced stability and durability. Compatible with underfloor heating systems. A beautiful and practical choice for any room.",
+    "Laminate Flooring"        : "Durable laminate flooring from Factory Direct Flooring. Scratch-resistant surface with a realistic wood or stone effect. Easy click-fit installation suitable for DIY. Ideal for busy family homes and high-traffic areas.",
+    "LVT Flooring"             : "Luxury Vinyl Tile flooring from Factory Direct Flooring. 100% waterproof and highly durable wear layer. Perfect for kitchens, bathrooms and hallways. Comfortable underfoot with stunning realistic designs.",
+    "Herringbone Flooring"     : "Elegant herringbone pattern flooring from Factory Direct Flooring. Classic design that adds character and style to any room. Available in wood and LVT options. Suits both traditional and contemporary interiors.",
+    "Vinyl Flooring"           : "Quality vinyl flooring from Factory Direct Flooring. Fully waterproof and extremely easy to clean. Ideal for kitchens, bathrooms and utility rooms. Available in a wide range of on-trend colours and styles.",
+    "Carpet"                   : "Soft and stylish carpet from Factory Direct Flooring. Warm and comfortable underfoot with excellent sound insulation. Available in a variety of colours, textures and pile heights. Perfect for bedrooms and living areas.",
+    "Underlay"                 : "Professional-grade underlay from Factory Direct Flooring. Provides cushioning, sound insulation and thermal comfort. Compatible with all floor types including underfloor heating. Essential for a perfect flooring installation.",
+    "Accessories"              : "Quality flooring accessories from Factory Direct Flooring. Everything you need for a professional flooring installation. High-quality trims, adhesives and installation tools to complement your new floor.",
 }
 
 SHOPIFY_COLS = [
@@ -87,34 +87,133 @@ def make_handle(url, name):
     h = re.sub(r"[^a-z0-9]+","-",name.lower()).strip("-")
     return h[:200]
 
-def get_images(html):
-    imgs, seen = [], set()
+def clean_img(url):
+    """Clean image URL — remove query params, ensure valid."""
+    u = str(url).strip().split("?")[0]
+    if u.startswith("http") and "catalog/product" in u and len(u) > 50:
+        return u
+    return ""
+
+def get_product_images_only(item):
+    """
+    Get images ONLY from the JSON-LD product item itself.
+    Do NOT scan whole page — avoids mixing images from other products.
+    Returns max MAX_IMAGES clean URLs.
+    """
+    images = []
+    seen   = set()
+
     def add(u):
-        u = str(u).strip().split("?")[0]
-        if u.startswith("http") and "catalog/product" in u and u not in seen and len(u)>50:
-            seen.add(u); imgs.append(u)
-    for m in re.finditer(r'(?:src|data-src|data-original)=["\']'
-        r'(https?://[^"\'>\s]+/media/catalog/product/[^"\'>\s?]+)',html,re.I): add(m.group(1))
-    for m in re.finditer(r'(https?://[^"\'>\s,]+/media/catalog/product/[^"\'>\s,?]+)',html): add(m.group(1))
-    for m in re.finditer(r'srcset=["\']([^"\']+)',html):
-        for p in m.group(1).split(","):
-            u = p.strip().split(" ")[0]
-            if "catalog/product" in u: add(u)
-    for m in re.finditer(r'<meta[^>]+property=["\']og:image[^"\']*["\'][^>]+content=["\']([^"\']+)',html): add(m.group(1))
-    for m in re.finditer(r'data-zoom-image=["\']([^"\']+)',html): add(m.group(1))
-    for m in re.finditer(r'"(?:full|img|original)"\s*:\s*"([^"]+catalog/product[^"]+)"',html):
-        add(m.group(1).replace("\\/","/"))
-    return imgs
+        u = clean_img(u)
+        if u and u not in seen:
+            seen.add(u)
+            images.append(u)
+
+    imgs = item.get("image", [])
+    if isinstance(imgs, str): imgs = [imgs]
+    if isinstance(imgs, dict): imgs = [imgs.get("url","")]
+    for img in imgs:
+        add(img)
+
+    # Also check offers.image
+    offers = item.get("offers", {})
+    if isinstance(offers, list): offers = offers[0] if offers else {}
+    if isinstance(offers, dict):
+        add(offers.get("image",""))
+
+    return images[:MAX_IMAGES]
+
+
+def get_card_image(card_html):
+    """Get single image from an HTML product card."""
+    for pat in [
+        r'data-src=["\']([^"\']+/media/catalog/product/[^"\'?\s]+)',
+        r'src=["\']([^"\']+/media/catalog/product/[^"\'?\s]+)',
+        r'content=["\']([^"\']+/media/catalog/product/[^"\'?\s]+)',
+    ]:
+        m = re.search(pat, card_html, re.I)
+        if m:
+            u = clean_img(m.group(1))
+            if u: return [u]
+    return []
 
 def build_description(name, cat_name):
-    """Build a proper product description from name + category template."""
     template = DESC_TEMPLATES.get(cat_name, "Quality flooring product from Factory Direct Flooring.")
-    return f"<h2>{name}</h2><p>{template}</p><p>Shop the full range of {cat_name.lower()} at Factory Direct Flooring — the UK's leading flooring specialist.</p>"
+    return f"<h2>{name}</h2><p>{template}</p>"
 
 # ── Parse products from category page ────────────────────────────────────────
 
-def extract_jsonld(item, html, cat_name):
-    if not isinstance(item,dict) or item.get("@type")!="Product": return None
+def parse_page(html, cat_name):
+    products = []
+    seen     = set()
+
+    # ── JSON-LD ───────────────────────────────────────────────────────
+    for block in re.findall(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html, re.DOTALL
+    ):
+        try:
+            data  = json.loads(block.strip())
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if not isinstance(item, dict): continue
+
+                if item.get("@type") == "ItemList":
+                    for el in item.get("itemListElement", []):
+                        p = el.get("item", el)
+                        prod = extract_product(p, cat_name)
+                        if prod and prod["name"] not in seen:
+                            seen.add(prod["name"])
+                            products.append(prod)
+
+                elif item.get("@type") == "Product":
+                    prod = extract_product(item, cat_name)
+                    if prod and prod["name"] not in seen:
+                        seen.add(prod["name"])
+                        products.append(prod)
+        except: pass
+
+    # ── HTML cards fallback ───────────────────────────────────────────
+    if not products:
+        cards = re.findall(
+            r'<(?:li|div|article)[^>]+class="[^"]*product[^"]*item[^"]*"[^>]*>(.*?)</(?:li|div|article)>',
+            html, re.DOTALL|re.I
+        )
+        for card in cards:
+            nm = (re.search(r'class="[^"]*(?:product.name|name)[^"]*"[^>]*>.*?<a[^>]*>(.*?)</a>', card, re.DOTALL|re.I)
+                  or re.search(r'<a[^>]+title="([^"]{5,})"', card))
+            name = clean(nm.group(1)) if nm else ""
+            if not name or name in seen: continue
+            seen.add(name)
+
+            url_m    = re.search(r'href="(' + re.escape(BASE_URL) + r'/[^"]+)"', card)
+            prod_url = url_m.group(1) if url_m else ""
+            pm       = re.search(r'£\s*([\d,]+\.?\d*)', card)
+            price    = pm.group(1).replace(",","") if pm else ""
+            sku_m    = re.search(r'data-sku=["\']([^"\']+)["\']', card)
+            sku      = sku_m.group(1) if sku_m else ""
+
+            # Only card-specific image
+            images   = get_card_image(card)
+
+            products.append({
+                "name"    : name,
+                "sku"     : sku,
+                "price"   : price,
+                "compare" : "",
+                "brand"   : "Factory Direct Flooring",
+                "category": cat_name,
+                "images"  : images,
+                "stock"   : "active",
+                "url"     : prod_url,
+            })
+
+    return products
+
+
+def extract_product(item, cat_name):
+    if not isinstance(item, dict) or item.get("@type") != "Product":
+        return None
     name = clean(item.get("name",""))
     if not name or len(name) < 3: return None
 
@@ -128,89 +227,26 @@ def extract_jsonld(item, html, cat_name):
     offers = item.get("offers",{})
     if isinstance(offers,list): offers = offers[0] if offers else {}
     if isinstance(offers,dict):
-        price   = str(offers.get("price",offers.get("lowPrice","")))
+        price   = str(offers.get("price", offers.get("lowPrice","")))
         hp      = offers.get("highPrice","")
         compare = str(hp) if hp and hp != price else ""
         avail   = offers.get("availability","")
         stock   = "active" if "InStock" in avail else "draft"
 
-    images = []
-    imgs = item.get("image",[])
-    if isinstance(imgs,str): imgs=[imgs]
-    if isinstance(imgs,dict): imgs=[imgs.get("url","")]
-    for img in imgs:
-        c = str(img).split("?")[0]
-        if c.startswith("http") and c not in images: images.append(c)
-    for img in get_images(html):
-        if img not in images: images.append(img)
-
-    desc = build_description(name, cat_name)
+    # Only get images from THIS product's JSON-LD — no page scanning
+    images = get_product_images_only(item)
 
     return {
-        "name":name, "sku":sku, "price":price, "compare":compare,
-        "brand":brand or "Factory Direct Flooring", "category":cat_name,
-        "images":images, "desc":desc,
-        "tags":[cat_name.lower().replace(" ","-")], "stock":stock,
-        "url":item.get("url",""), "seo_title":name[:255],
-        "seo_desc":clean(DESC_TEMPLATES.get(cat_name,""))[:320],
+        "name"    : name,
+        "sku"     : sku,
+        "price"   : price,
+        "compare" : compare,
+        "brand"   : brand or "Factory Direct Flooring",
+        "category": cat_name,
+        "images"  : images,
+        "stock"   : stock,
+        "url"     : item.get("url",""),
     }
-
-def parse_page(html, cat_name):
-    products = []
-    seen     = set()
-
-    # JSON-LD
-    for block in re.findall(
-        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',html,re.DOTALL):
-        try:
-            data  = json.loads(block.strip())
-            items = data if isinstance(data,list) else [data]
-            for item in items:
-                if not isinstance(item,dict): continue
-                if item.get("@type")=="ItemList":
-                    for el in item.get("itemListElement",[]):
-                        p = extract_jsonld(el.get("item",el),html,cat_name)
-                        if p and p["name"] not in seen:
-                            seen.add(p["name"]); products.append(p)
-                elif item.get("@type")=="Product":
-                    p = extract_jsonld(item,html,cat_name)
-                    if p and p["name"] not in seen:
-                        seen.add(p["name"]); products.append(p)
-        except: pass
-
-    # HTML cards fallback
-    if not products:
-        cards = re.findall(
-            r'<(?:li|div|article)[^>]+class="[^"]*product[^"]*item[^"]*"[^>]*>(.*?)</(?:li|div|article)>',
-            html, re.DOTALL|re.I)
-        for card in cards:
-            nm = (re.search(r'class="[^"]*(?:product.name|name)[^"]*"[^>]*>.*?<a[^>]*>(.*?)</a>',card,re.DOTALL|re.I)
-                  or re.search(r'<a[^>]+title="([^"]{5,})"',card))
-            name = clean(nm.group(1)) if nm else ""
-            if not name or name in seen: continue
-            seen.add(name)
-
-            url_m    = re.search(r'href="('+re.escape(BASE_URL)+r'/[^"]+)"',card)
-            prod_url = url_m.group(1) if url_m else ""
-            pm       = re.search(r'£\s*([\d,]+\.?\d*)',card)
-            price    = pm.group(1).replace(",","") if pm else ""
-            sku_m    = re.search(r'data-sku=["\']([^"\']+)["\']',card)
-            sku      = sku_m.group(1) if sku_m else ""
-            im       = re.search(r'(?:src|data-src)=["\']'
-                       r'(https?://[^"\']+/media/catalog/product/[^"\'?\s]+)',card)
-            img      = im.group(1).split("?")[0] if im else ""
-            desc     = build_description(name, cat_name)
-
-            products.append({
-                "name":name, "sku":sku, "price":price, "compare":"",
-                "brand":"Factory Direct Flooring", "category":cat_name,
-                "images":[img] if img else [], "desc":desc,
-                "tags":[cat_name.lower().replace(" ","-")], "stock":"active",
-                "url":prod_url, "seo_title":name[:255],
-                "seo_desc":clean(DESC_TEMPLATES.get(cat_name,""))[:320],
-            })
-
-    return products
 
 # ── Scrape all categories ─────────────────────────────────────────────────────
 
@@ -242,16 +278,20 @@ def scrape_all():
             if new == 0 and page > 1: break
 
             next_url = None
-            rel = re.search(r'<link[^>]+rel=["\']next["\'][^>]+href=["\']([^"\']+)["\']',html)
+            rel = re.search(r'<link[^>]+rel=["\']next["\'][^>]+href=["\']([^"\']+)["\']', html)
             if rel:
-                n=rel.group(1); next_url=n if n.startswith("http") else BASE_URL+n
+                n = rel.group(1)
+                next_url = n if n.startswith("http") else BASE_URL + n
             else:
-                pg = re.search(r'href=["\']([^"\']*[?&]p='+str(page+1)+r'[^"\']*)["\']',html)
+                pg = re.search(r'href=["\']([^"\']*[?&]p=' + str(page+1) + r'[^"\']*)["\']', html)
                 if pg:
-                    n=pg.group(1); next_url=n if n.startswith("http") else BASE_URL+n
+                    n = pg.group(1)
+                    next_url = n if n.startswith("http") else BASE_URL + n
 
             if not next_url: break
-            cur_url=next_url; page+=1; time.sleep(0.5)
+            cur_url = next_url
+            page   += 1
+            time.sleep(0.5)
 
     return all_products
 
@@ -263,17 +303,14 @@ def build_rows(p):
 
     handle    = p.get("handle") or make_handle(p.get("url",""), name)
     cat_raw   = p.get("category","Flooring")
-    body      = p.get("desc","")
+    body      = build_description(name, cat_raw)
     vendor    = p.get("brand","").strip() or "Factory Direct Flooring"
-    tags_set  = set(p.get("tags",[]))
-    tags_set.add(cat_raw.lower().replace(" ","-"))
-    tags      = ", ".join(sorted(tags_set)[:20])
-    images    = [i for i in p.get("images",[]) if i and i.startswith("http")]
+    tags      = cat_raw.lower().replace(" ","-")
+    images    = [i for i in p.get("images",[]) if i and i.startswith("http")][:MAX_IMAGES]
     price     = price_fmt(p.get("price","")) or "0.00"
     compare   = price_fmt(p.get("compare",""))
     first_img = images[0] if images else ""
-    seo_t     = (p.get("seo_title") or name)[:255]
-    seo_d     = (p.get("seo_desc") or "")[:320]
+    seo_desc  = DESC_TEMPLATES.get(cat_raw,"")[:320]
 
     rows = []
 
@@ -282,8 +319,8 @@ def build_rows(p):
         "Title"                      : name,
         "Body (HTML)"                : body,
         "Vendor"                     : vendor,
-        "Product Category"           : "",        # BLANK = zero taxonomy errors
-        "Type"                       : cat_raw,   # category goes here — works perfectly
+        "Product Category"           : "",
+        "Type"                       : cat_raw,
         "Tags"                       : tags,
         "Published"                  : "TRUE",
         "Option1 Name"               : "Title",
@@ -301,14 +338,19 @@ def build_rows(p):
         "Image Src"                  : first_img,
         "Image Position"             : "1" if first_img else "",
         "Image Alt Text"             : name,
-        "SEO Title"                  : seo_t,
-        "SEO Description"            : seo_d,
+        "SEO Title"                  : name[:255],
+        "SEO Description"            : seo_desc,
         "Status"                     : p.get("stock","active"),
     })
 
     for i, img in enumerate(images[1:], 2):
         empty = {k:"" for k in SHOPIFY_COLS}
-        empty.update({"Handle":handle,"Image Src":img,"Image Position":str(i),"Image Alt Text":name})
+        empty.update({
+            "Handle"        : handle,
+            "Image Src"     : img,
+            "Image Position": str(i),
+            "Image Alt Text": name,
+        })
         rows.append(empty)
 
     return rows
@@ -320,8 +362,8 @@ def main():
     t0 = time.time()
 
     print("\n" + "="*65)
-    print("  FACTORY DIRECT FLOORING — SHOPIFY SCRAPER (FINAL)")
-    print("  Product Category=BLANK | Description=Auto-generated")
+    print("  FACTORY DIRECT FLOORING — FINAL CLEAN SHOPIFY SCRAPER")
+    print(f"  Max {MAX_IMAGES} images per product | Auto descriptions")
     print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*65)
 
@@ -329,9 +371,9 @@ def main():
 
     if not products:
         print("  No products found")
-        with open(f"{OUTPUT_DIR}/factory_flooring_shopify_{TIMESTAMP}.csv","w",
-                  encoding="utf-8-sig",newline="") as f:
-            csv.DictWriter(f,fieldnames=SHOPIFY_COLS).writeheader()
+        with open(f"{OUTPUT_DIR}/factory_flooring_shopify_{TIMESTAMP}.csv",
+                  "w", encoding="utf-8-sig", newline="") as f:
+            csv.DictWriter(f, fieldnames=SHOPIFY_COLS).writeheader()
         return
 
     all_rows = []
@@ -339,23 +381,31 @@ def main():
         all_rows.extend(build_rows(p))
 
     csv_file = f"{OUTPUT_DIR}/factory_flooring_shopify_{TIMESTAMP}.csv"
-    with open(csv_file,"w",encoding="utf-8-sig",newline="") as f:
-        writer = csv.DictWriter(f,fieldnames=SHOPIFY_COLS,extrasaction="ignore")
-        writer.writeheader(); writer.writerows(all_rows)
+    with open(csv_file, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=SHOPIFY_COLS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(all_rows)
 
     json_file = f"{OUTPUT_DIR}/factory_flooring_{TIMESTAMP}.json"
-    with open(json_file,"w",encoding="utf-8") as f:
+    with open(json_file, "w", encoding="utf-8") as f:
         json.dump([{
-            "name":p["name"],"handle":p.get("handle",""),"sku":p["sku"],
-            "price":p["price"],"brand":p["brand"],"category":p["category"],
-            "stock":p["stock"],"images":p["images"],"img_count":len(p["images"]),
-            "url":p.get("url",""),
+            "name"     : p["name"],
+            "handle"   : p.get("handle",""),
+            "sku"      : p["sku"],
+            "price"    : p["price"],
+            "brand"    : p["brand"],
+            "category" : p["category"],
+            "stock"    : p["stock"],
+            "images"   : p["images"],
+            "img_count": len(p["images"]),
+            "url"      : p.get("url",""),
         } for p in products], f, ensure_ascii=False, indent=2)
 
-    elapsed    = round(time.time()-t0)
+    elapsed    = round(time.time() - t0)
     with_img   = len([p for p in products if p["images"]])
     cats = {}
-    for p in products: cats[p["category"]] = cats.get(p["category"],0)+1
+    for p in products:
+        cats[p["category"]] = cats.get(p["category"], 0) + 1
 
     print(f"\n{'='*65}")
     print(f"  DONE in {elapsed//60}m {elapsed%60:02d}s")
@@ -363,12 +413,14 @@ def main():
     print(f"  CSV rows   : {len(all_rows)}")
     print(f"  With images: {with_img} ({round(with_img/len(products)*100) if products else 0}%)")
     print(f"\n  By category:")
-    for cat,count in sorted(cats.items(),key=lambda x:-x[1]):
+    for cat, count in sorted(cats.items(), key=lambda x: -x[1]):
         print(f"    {cat:<35} {count:>3}")
     print(f"\n  CSV  : {csv_file}")
-    print(f"  Shopify: Products → Import → Upload CSV")
-    print(f"  No taxonomy errors. Categories in 'Type' field.")
+    print(f"  JSON : {json_file}")
+    print(f"  Shopify → Products → Import → Upload CSV")
+    print(f"  Smart Collections → Product type is equal to [category]")
     print("="*65)
+
 
 if __name__ == "__main__":
     main()
