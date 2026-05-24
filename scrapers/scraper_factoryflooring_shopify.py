@@ -1,58 +1,46 @@
 """
-FACTORY DIRECT FLOORING — SHOPIFY SCRAPER (FIXED)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Fixes:
-  ✓ next variable bug fixed (was crashing categories)
-  ✓ Multiple URL patterns tried for each category
-  ✓ Aggressive imagely URL extraction (10 patterns)
-  ✓ Images downloaded → GitHub Pages → Shopify
-  ✓ Prices, descriptions, types — all included
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FACTORY DIRECT FLOORING — FINAL SHOPIFY SCRAPER (PLAYWRIGHT)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Uses real headless Chrome (Playwright) to:
+  ✓ Scroll each category page → all lazy-loaded images appear
+  ✓ Extract imagely CDN URLs for every product
+  ✓ Download images → GitHub Pages → Shopify import works 100%
+  ✓ Prices, descriptions, types — everything included
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
-import requests, json, csv, re, os, time
+import json, csv, re, os, time, requests
 from datetime import datetime
 from html import unescape
 from urllib.parse import urlparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+
+try:
+    from playwright.sync_api import sync_playwright
+    PLAYWRIGHT_OK = True
+except ImportError:
+    PLAYWRIGHT_OK = False
+    print("  Playwright not installed — using requests fallback")
 
 BASE_URL    = "https://www.factory-direct-flooring.co.uk"
 OUTPUT_DIR  = "output"
 IMAGES_DIR  = "output/images"
 TIMESTAMP   = datetime.now().strftime("%Y%m%d_%H%M%S")
 MAX_IMAGES  = 3
-THREADS     = 6
-DELAY       = 0.5
 
 GITHUB_USER  = "shadiikart-prog"
 GITHUB_REPO  = "product-scraper-demo"
 IMAGES_BASE  = f"https://{GITHUB_USER}.github.io/{GITHUB_REPO}/scrapers/output/images"
 
-HEADERS = {
-    "User-Agent"      : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept"          : "text/html,application/xhtml+xml;q=0.9,image/webp,*/*;q=0.8",
-    "Accept-Language" : "en-GB,en;q=0.9",
-    "Accept-Encoding" : "gzip, deflate, br",
-    "Connection"      : "keep-alive",
-    "Cache-Control"   : "no-cache",
-    "Pragma"          : "no-cache",
-}
-IMG_HDR = {
-    "User-Agent" : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept"     : "image/webp,image/apng,image/*,*/*;q=0.8",
-    "Referer"    : "https://www.factory-direct-flooring.co.uk/",
-}
-
 CATEGORIES = [
-    ("Solid Wood",      "/solid-wood-flooring"),
-    ("Engineered Wood", "/engineered-wood-flooring"),
-    ("Laminate",        "/laminate-flooring"),
-    ("LVT",             "/lvt-flooring"),
-    ("Herringbone",     "/herringbone-flooring"),
-    ("Vinyl",           "/vinyl-flooring"),
-    ("Carpet",          "/carpet"),
-    ("Underlay",        "/underlay"),
-    ("Accessories",     "/accessories"),
+    ("Solid Wood",      f"{BASE_URL}/solid-wood-flooring"),
+    ("Engineered Wood", f"{BASE_URL}/engineered-wood-flooring"),
+    ("Laminate",        f"{BASE_URL}/laminate-flooring"),
+    ("LVT",             f"{BASE_URL}/lvt-flooring"),
+    ("Herringbone",     f"{BASE_URL}/herringbone-flooring"),
+    ("Vinyl",           f"{BASE_URL}/vinyl-flooring"),
+    ("Carpet",          f"{BASE_URL}/carpet"),
+    ("Underlay",        f"{BASE_URL}/underlay"),
+    ("Accessories",     f"{BASE_URL}/accessories"),
 ]
 
 SHOPIFY_COLS = [
@@ -64,20 +52,31 @@ SHOPIFY_COLS = [
     "Image Src","Image Position","Image Alt Text","SEO Title","SEO Description","Status",
 ]
 
+IMG_HDR = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+    "Accept"    : "image/webp,image/apng,image/*,*/*;q=0.8",
+    "Referer"   : "https://www.factory-direct-flooring.co.uk/",
+}
+
+IMAGELY_RE = re.compile(
+    r'https://imagely\.factory-direct-flooring\.co\.uk'
+    r'/media/catalog/product/[^\s"\'<>\)\\,\]]+', re.I
+)
+
 # ── Descriptions ───────────────────────────────────────────────────────────────
 
 def hints(title):
     tl = title.lower()
     brands = ['karndean','kahrs','quick-step','quickstep','amtico','ted todd','elka',
-              'wicanders','moduleo','polyflor','tarkett','egger','krono','balterio',
-              'camaro','boen','hakwood','woodpecker','lifestyle','rhinofloor','altro']
+              'wicanders','moduleo','polyflor','tarkett','egger','balterio',
+              'camaro','boen','hakwood','woodpecker','lifestyle','rhinofloor']
     brand  = next((b.title() for b in brands if b in tl), "")
     thick  = re.search(r'(\d+(?:\.\d+)?)\s*mm', title, re.I)
     ts     = thick.group(1)+"mm" if thick else ""
-    colours = ['oak','walnut','pine','ash','maple','birch','cherry','white','grey','gray',
-               'black','brown','beige','cream','ivory','natural','smoked','rustic','aged',
-               'blond','golden','silver','slate','stone','marble','teak','ebony']
-    colour = next((c.title() for c in colours if c in tl), "")
+    cols   = ['oak','walnut','pine','ash','maple','birch','cherry','white','grey','gray',
+              'black','brown','beige','cream','ivory','natural','smoked','rustic','aged',
+              'blond','golden','silver','slate','stone','marble','teak']
+    colour = next((c.title() for c in cols if c in tl), "")
     return brand, ts, colour
 
 def build_desc(title, cat):
@@ -85,104 +84,29 @@ def build_desc(title, cat):
     bl = f" by <strong>{brand}</strong>" if brand else " from Factory Direct Flooring"
     cl = f" in a beautiful <strong>{colour}</strong> finish" if colour else ""
     tl = f" with a <strong>{thick}</strong> thickness" if thick else ""
-
     d = {
-        "Solid Wood": (
-            f"<h2>{title}</h2><p>Introducing the <strong>{title}</strong>{bl}{cl}{tl}. 100% genuine solid timber delivering unmatched natural beauty and character that only improves with age.</p>",
-            "<h3>Key Features</h3><ul><li><strong>100% Real Solid Timber</strong></li><li><strong>Sand &amp; Refinish Up to 5 Times</strong></li><li><strong>Natural Insulator</strong> — reduces energy bills</li><li><strong>Increases Property Value</strong></li><li><strong>Sustainably Sourced</strong></li></ul>",
-            "<h3>Installation</h3><p>Secret-nail or glue. Acclimatise 48–72 hrs. 15mm expansion gap. Professional fitting recommended.</p>",
-            "<h3>Care</h3><p>Soft brush vacuum. Wood cleaner on damp mop. Wipe spills immediately.</p>",
-        ),
-        "Engineered Wood": (
-            f"<h2>{title}</h2><p>Discover the <strong>{title}</strong>{bl}{cl}{tl}. Real wood top layer with stable multi-layer core — authentic beauty with superior stability, compatible with underfloor heating.</p>",
-            "<h3>Key Features</h3><ul><li><strong>Real Wood Surface</strong></li><li><strong>Stable Multi-Layer Core</strong></li><li><strong>UFH Compatible</strong></li><li><strong>All Floor Levels</strong></li><li><strong>Click, Nail or Glue</strong></li></ul>",
-            "<h3>Installation</h3><p>Floating click, secret-nail or glue-down. UFH max 27°C. Acclimatise 48 hrs.</p>",
-            "<h3>Care</h3><p>Vacuum regularly. Wood floor cleaner on damp mop. No steam or excess water.</p>",
-        ),
-        "Laminate": (
-            f"<h2>{title}</h2><p>Meet the <strong>{title}</strong>{bl}{cl}{tl}. Authentic wood or stone look at a fraction of the cost — scratch resistant and easy to install.</p>",
-            "<h3>Key Features</h3><ul><li><strong>HD Surface Layer</strong></li><li><strong>AC-Rated Scratch Resistance</strong></li><li><strong>Easy Click Fit</strong></li><li><strong>V-Groove Edges</strong></li><li><strong>Low Maintenance</strong></li></ul>",
-            "<h3>Installation</h3><p>Click-lock floating. 10mm expansion gap. Quality underlay required.</p>",
-            "<h3>Care</h3><p>Vacuum with soft brush. Well-wrung damp mop with laminate cleaner. No steam.</p>",
-        ),
-        "LVT": (
-            f"<h2>{title}</h2><p>Introducing the <strong>{title}</strong>{bl}{cl}{tl}. 100% waterproof luxury vinyl with hyper-realistic designs — perfect for kitchens, bathrooms and all rooms.</p>",
-            "<h3>Key Features</h3><ul><li><strong>100% Waterproof</strong></li><li><strong>Commercial Wear Layer</strong></li><li><strong>Hyper-Realistic Surface</strong></li><li><strong>Warmer Than Tile</strong></li><li><strong>UFH Compatible</strong></li></ul>",
-            "<h3>Installation</h3><p>Click-lock, loose-lay or glue-down. Clean dry flat subfloor. No acclimatisation needed.</p>",
-            "<h3>Care</h3><p>Vacuum to remove grit. Warm water with LVT cleaner. No abrasives.</p>",
-        ),
-        "Herringbone": (
-            f"<h2>{title}</h2><p>Make a bold statement with the <strong>{title}</strong>{bl}{cl}{tl}. Iconic herringbone pattern — timeless elegance in wood and LVT.</p>",
-            "<h3>Key Features</h3><ul><li><strong>Iconic 45° Pattern</strong></li><li><strong>Creates Space</strong></li><li><strong>Wood &amp; LVT Options</strong></li><li><strong>Unique Character</strong></li><li><strong>Suits All Rooms</strong></li></ul>",
-            "<h3>Installation</h3><p>Mark centre line and 45° angle precisely. Professional fitting recommended.</p>",
-            "<h3>Care</h3><p>Wood type: wood cleaner on damp mop. LVT type: warm water and LVT cleaner.</p>",
-        ),
-        "Vinyl": (
-            f"<h2>{title}</h2><p>Presenting the <strong>{title}</strong>{bl}{cl}{tl}. Fully waterproof premium vinyl — ideal for kitchens, bathrooms and high-traffic areas.</p>",
-            "<h3>Key Features</h3><ul><li><strong>Fully Waterproof</strong></li><li><strong>Tough Wear Surface</strong></li><li><strong>Cushioned Underfoot</strong></li><li><strong>Easy to Clean</strong></li><li><strong>Realistic Designs</strong></li></ul>",
-            "<h3>Installation</h3><p>Loose-laid, adhered or click-lock. Clean dry smooth subfloor.</p>",
-            "<h3>Care</h3><p>Sweep and mop with warm water and mild cleaner. Stain resistant.</p>",
-        ),
-        "Carpet": (
-            f"<h2>{title}</h2><p>Transform your home with the <strong>{title}</strong>{bl}{cl}. Luxuriously soft and warm — perfect for bedrooms, living rooms and stairs.</p>",
-            "<h3>Key Features</h3><ul><li><strong>Luxuriously Soft</strong></li><li><strong>Sound Insulation</strong></li><li><strong>Thermal Properties</strong></li><li><strong>Wide Colour Range</strong></li><li><strong>Durable</strong></li></ul>",
-            "<h3>Installation</h3><p>Professional fitting over quality underlay recommended.</p>",
-            "<h3>Care</h3><p>Vacuum twice weekly. Blot spills immediately. Professional cleaning annually.</p>",
-        ),
-        "Underlay": (
-            f"<h2>{title}</h2><p>The <strong>{title}</strong>{bl} — professional underlay for comfort, sound insulation and extended floor life.</p>",
-            "<h3>Key Features</h3><ul><li><strong>Superior Cushioning</strong></li><li><strong>Sound Reduction</strong></li><li><strong>Thermal Insulation</strong></li><li><strong>Moisture Protection</strong></li><li><strong>Extends Floor Life</strong></li></ul>",
-            "<h3>Installation</h3><p>Lay smooth-side down. Butt edges. Tape joins. Replace when fitting new flooring.</p>",
-            "<h3>Care</h3><p>No maintenance needed once installed.</p>",
-        ),
-        "Accessories": (
-            f"<h2>{title}</h2><p>Complete your installation with the <strong>{title}</strong>{bl}. Professional quality finishing accessories.</p>",
-            "<h3>Key Features</h3><ul><li><strong>Professional Quality</strong></li><li><strong>Wide Compatibility</strong></li><li><strong>Easy Installation</strong></li><li><strong>Excellent Value</strong></li></ul>",
-            "<h3>Installation</h3><p>Refer to packaging guidelines.</p>",
-            "<h3>Care</h3><p>Maintenance-free once installed.</p>",
-        ),
+        "Solid Wood"     : (f"<h2>{title}</h2><p><strong>{title}</strong>{bl}{cl}{tl}. 100% genuine solid timber — unmatched natural beauty that improves with age.</p>","<h3>Features</h3><ul><li>100% Real Solid Timber</li><li>Sand &amp; Refinish 5x</li><li>Natural Insulator</li><li>Adds Property Value</li><li>Sustainably Sourced</li></ul>","<h3>Installation</h3><p>Secret-nail or glue. Acclimatise 48–72 hrs. 15mm expansion gap.</p>","<h3>Care</h3><p>Soft brush vacuum. Wood cleaner on damp mop. Wipe spills immediately.</p>"),
+        "Engineered Wood": (f"<h2>{title}</h2><p><strong>{title}</strong>{bl}{cl}{tl}. Real wood top layer with stable core — beauty and durability. UFH compatible.</p>","<h3>Features</h3><ul><li>Real Wood Surface</li><li>Stable Core</li><li>UFH Compatible</li><li>All Floor Levels</li><li>Click/Nail/Glue Options</li></ul>","<h3>Installation</h3><p>Floating click, secret-nail or glue. UFH max 27°C. Acclimatise 48 hrs.</p>","<h3>Care</h3><p>Vacuum regularly. Wood cleaner on damp mop. No steam or excess water.</p>"),
+        "Laminate"       : (f"<h2>{title}</h2><p><strong>{title}</strong>{bl}{cl}{tl}. Authentic wood/stone look at a fraction of the cost — scratch-resistant and easy to fit.</p>","<h3>Features</h3><ul><li>HD Surface Layer</li><li>AC-Rated Scratch Resistance</li><li>Easy Click Fit</li><li>V-Groove Edges</li><li>Low Maintenance</li></ul>","<h3>Installation</h3><p>Click-lock floating. 10mm expansion gap. Quality underlay required.</p>","<h3>Care</h3><p>Vacuum with soft brush. Well-wrung damp mop. No steam cleaners.</p>"),
+        "LVT"            : (f"<h2>{title}</h2><p><strong>{title}</strong>{bl}{cl}{tl}. 100% waterproof luxury vinyl — hyper-realistic designs for any room.</p>","<h3>Features</h3><ul><li>100% Waterproof</li><li>Commercial Wear Layer</li><li>Hyper-Realistic</li><li>Warmer Than Tile</li><li>UFH Compatible</li></ul>","<h3>Installation</h3><p>Click-lock, loose-lay or glue. Clean dry flat subfloor. No acclimatisation.</p>","<h3>Care</h3><p>Vacuum to remove grit. Warm water + LVT cleaner. No abrasives.</p>"),
+        "Herringbone"    : (f"<h2>{title}</h2><p><strong>{title}</strong>{bl}{cl}{tl}. Iconic herringbone pattern — timeless elegance in wood and LVT.</p>","<h3>Features</h3><ul><li>Iconic 45° Pattern</li><li>Creates Space</li><li>Wood &amp; LVT Options</li><li>Unique Character</li><li>Suits All Rooms</li></ul>","<h3>Installation</h3><p>Mark centre line and 45° angle. Professional fitting recommended.</p>","<h3>Care</h3><p>Wood type: wood cleaner. LVT type: warm water + LVT cleaner.</p>"),
+        "Vinyl"          : (f"<h2>{title}</h2><p><strong>{title}</strong>{bl}{cl}{tl}. Fully waterproof premium vinyl — ideal for kitchens, bathrooms and busy areas.</p>","<h3>Features</h3><ul><li>Fully Waterproof</li><li>Tough Wear Surface</li><li>Cushioned &amp; Quiet</li><li>Easy to Clean</li><li>Realistic HD Designs</li></ul>","<h3>Installation</h3><p>Loose-laid, adhered or click-lock. Clean dry smooth subfloor.</p>","<h3>Care</h3><p>Sweep and mop with warm water + mild cleaner. Stain resistant.</p>"),
+        "Carpet"         : (f"<h2>{title}</h2><p><strong>{title}</strong>{bl}{cl}. Luxuriously soft and warm — perfect for bedrooms, living rooms and stairs.</p>","<h3>Features</h3><ul><li>Luxuriously Soft</li><li>Sound Insulation</li><li>Thermal Properties</li><li>Wide Colour Range</li><li>Durable</li></ul>","<h3>Installation</h3><p>Professional fitting over quality underlay recommended.</p>","<h3>Care</h3><p>Vacuum twice weekly. Blot spills. Annual professional cleaning.</p>"),
+        "Underlay"       : (f"<h2>{title}</h2><p><strong>{title}</strong>{bl}. Professional underlay for comfort, sound insulation and extended floor life.</p>","<h3>Features</h3><ul><li>Superior Cushioning</li><li>Sound Reduction</li><li>Thermal Insulation</li><li>Moisture Protection</li><li>Extends Floor Life</li></ul>","<h3>Installation</h3><p>Lay smooth-side down. Butt edges. Tape joins. Replace with new flooring.</p>","<h3>Care</h3><p>No maintenance needed once installed.</p>"),
+        "Accessories"    : (f"<h2>{title}</h2><p><strong>{title}</strong>{bl}. Professional quality finishing accessories.</p>","<h3>Features</h3><ul><li>Professional Quality</li><li>Wide Compatibility</li><li>Easy Installation</li><li>Excellent Value</li></ul>","<h3>Installation</h3><p>Refer to packaging guidelines.</p>","<h3>Care</h3><p>Maintenance-free once installed.</p>"),
     }
-    default = (
-        f"<h2>{title}</h2><p>{title}{bl}. Quality flooring from Factory Direct Flooring.</p>",
-        "<h3>Features</h3><ul><li>High quality</li><li>Stylish design</li><li>Easy maintenance</li></ul>",
-        "<h3>Installation</h3><p>Refer to product specification.</p>",
-        "<h3>Care</h3><p>Clean with appropriate products.</p>",
-    )
-    i, f, n, c = d.get(cat, default)
+    default = (f"<h2>{title}</h2><p>{title}{bl}. Quality flooring from Factory Direct Flooring.</p>","<h3>Features</h3><ul><li>High quality</li><li>Stylish design</li><li>Easy maintenance</li></ul>","<h3>Installation</h3><p>Refer to product specification.</p>","<h3>Care</h3><p>Clean with appropriate products.</p>")
+    i,f,n,c = d.get(cat, default)
     why = "<h3>Why Factory Direct Flooring?</h3><p>UK's trusted flooring specialist — premium quality at factory direct prices. Free samples, expert advice and fast UK delivery.</p>"
     return f"{i}\n{f}\n{n}\n{c}\n{why}"
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def fetch(url, timeout=20):
-    """Fetch URL trying multiple User-Agent patterns."""
-    agents = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    ]
-    for agent in agents:
-        h = dict(HEADERS); h["User-Agent"] = agent
-        for _ in range(2):
-            try:
-                r = requests.get(url, headers=h, timeout=timeout)
-                if r.status_code == 200:
-                    return r.text
-                elif r.status_code in (301, 302):
-                    redir = r.headers.get("Location","")
-                    if redir: return fetch(redir, timeout)
-                elif r.status_code == 404:
-                    return ""
-                time.sleep(0.5)
-            except Exception:
-                time.sleep(1)
-    return ""
-
 def clean(t):
     if not t: return ""
     t = unescape(str(t))
-    t = re.sub(r"<[^>]+>", " ", t)
-    return re.sub(r"\s+", " ", t).strip()
+    t = re.sub(r"<[^>]+>"," ",t)
+    return re.sub(r"\s+"," ",t).strip()
 
 def price_fmt(p):
     try:
@@ -200,95 +124,36 @@ def safe_fname(url, idx):
     fname = os.path.basename(urlparse(url).path)
     fname = re.sub(r'[^a-zA-Z0-9\._\-]','_',fname)
     if not fname or len(fname) < 4: fname = f"img_{idx}.jpg"
-    # Ensure unique by prepending index
     return f"{idx:05d}_{fname}"
 
-# ── Imagely URL extraction ─────────────────────────────────────────────────────
-
-IMAGELY_RE = re.compile(
-    r'https://imagely\.factory-direct-flooring\.co\.uk'
-    r'/media/catalog/product/[^\s"\'<>\)\\,\]]+',
-    re.I
-)
-
-def get_imagely_urls(html):
-    """Extract ALL imagely URLs from any HTML using 6 methods."""
-    found = []
-    seen  = set()
-
-    def add(u):
-        u = str(u).strip()
-        u = re.sub(r'["\'\s].*$','',u)  # cut at quote or space
-        u = u.split("?")[0]
-        if (u.startswith("https://imagely") and
-                "catalog/product" in u and
-                u not in seen and
-                len(u) > 60 and
-                not u.endswith("/")):
+def get_imagely_urls(html_or_text):
+    found = []; seen = set()
+    for m in IMAGELY_RE.finditer(html_or_text):
+        u = m.group(0).split("?")[0]
+        if u not in seen and len(u) > 60 and not u.endswith("/"):
             seen.add(u); found.append(u)
+    return found
 
-    # 1. Direct regex — catches all bare URLs
-    for m in IMAGELY_RE.finditer(html):
-        add(m.group(0))
-
-    # 2. JSON-LD structured data
+def parse_products_from_html(html, cat):
+    """Extract products from HTML using JSON-LD."""
+    products = {}
     for block in re.findall(
         r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
         html, re.DOTALL
     ):
         try:
             data = json.loads(block)
-            txt  = json.dumps(data)
-            for m in IMAGELY_RE.finditer(txt): add(m.group(0))
-        except: pass
-
-    # 3. Inline Magento script blocks
-    for block in re.findall(
-        r'<script[^>]*>(.*?)</script>', html, re.DOTALL
-    ):
-        for m in IMAGELY_RE.finditer(block): add(m.group(0))
-
-    # 4. x-data Alpine.js attributes
-    for m in re.finditer(r'x-data=["\']([^"\']{20,})["\']', html):
-        for m2 in IMAGELY_RE.finditer(m.group(1)): add(m2.group(0))
-
-    # 5. data-* attributes
-    for m in re.finditer(r'data-[a-z\-]+=["\'](https://imagely[^"\']+)["\']', html, re.I):
-        add(m.group(1))
-
-    # 6. JSON in x-magento-init or similar
-    for block in re.findall(r'\{[^<]{100,}\}', html):
-        if 'imagely' in block:
-            for m in IMAGELY_RE.finditer(block): add(m.group(0))
-
-    return found
-
-# ── Parse products from category page ────────────────────────────────────────
-
-def parse_category_page(html, cat):
-    products = []
-    seen     = set()
-    all_imgs = get_imagely_urls(html)
-
-    # JSON-LD products
-    jl_products = []
-    for block in re.findall(
-        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-        html, re.DOTALL
-    ):
-        try:
-            data  = json.loads(block)
             items = data if isinstance(data,list) else [data]
             for item in items:
                 if not isinstance(item,dict): continue
                 def proc(p):
                     if not isinstance(p,dict) or p.get("@type")!="Product": return
                     nm = clean(p.get("name",""))
-                    if not nm or len(nm)<3: return
-                    brand="";b=p.get("brand",{})
+                    if not nm: return
+                    brand=""; b=p.get("brand",{})
                     if isinstance(b,dict): brand=clean(b.get("name",""))
                     elif isinstance(b,str): brand=clean(b)
-                    price="";compare="";stock="active"
+                    price=""; compare=""; stock="active"
                     of=p.get("offers",{})
                     if isinstance(of,list): of=of[0] if of else {}
                     if isinstance(of,dict):
@@ -297,195 +162,183 @@ def parse_category_page(html, cat):
                         compare=str(hp) if hp and hp!=price else ""
                         stock="active" if "InStock" in of.get("availability","") else "draft"
                     url=p.get("url","")
-                    slug=url.rstrip("/").split("/")[-1].replace(".html","").lower() if url else ""
-
-                    # JSON-LD images
-                    ji=[]
-                    imgs=p.get("image",[])
-                    if isinstance(imgs,str): imgs=[imgs]
-                    if isinstance(imgs,dict): imgs=[imgs.get("url","")]
-                    for img in imgs:
-                        u=str(img).split("?")[0]
-                        if "imagely" in u and len(u)>60: ji.append(u)
-
-                    jl_products.append({
+                    slug=url.rstrip("/").split("/")[-1].replace(".html","").lower()
+                    products[nm]={
                         "name":nm,"sku":str(p.get("sku","")),"url":url,"slug":slug,
-                        "brand":brand,"price":price,"compare":compare,"stock":stock,
-                        "json_imgs":ji,
-                    })
+                        "brand":brand,"price":price,"compare":compare,"stock":stock,"cat":cat,
+                    }
                 if item.get("@type")=="ItemList":
                     for el in item.get("itemListElement",[]): proc(el.get("item",el))
                 elif item.get("@type")=="Product": proc(item)
         except: pass
+    return products
 
-    # Match images to products by slug
+def assign_images(products_dict, all_imgs):
+    """Match imagely URLs to products using slug keywords."""
     used = set()
-    for p in jl_products:
-        if p["name"] in seen: continue
-        seen.add(p["name"])
-
+    for nm, p in products_dict.items():
+        slug = p.get("slug","")
+        words = [w for w in slug.replace("-"," ").split() if len(w)>3] if slug else []
         imgs = []
-
-        # First: use JSON-LD images
-        for u in p["json_imgs"]:
-            if u not in used and len(imgs)<MAX_IMAGES:
-                imgs.append(u); used.add(u)
-
-        # Second: slug-match from page images
-        if len(imgs) < MAX_IMAGES and p["slug"]:
-            words = [w for w in p["slug"].replace("-"," ").split() if len(w)>3]
+        if words:
             for u in all_imgs:
                 if u in used or len(imgs)>=MAX_IMAGES: continue
                 ul = u.lower()
-                if words and (words[0] in ul or sum(1 for w in words if w in ul)>=2):
+                score = sum(1 for w in words if w in ul)
+                if words[0] in ul or score >= 2:
                     imgs.append(u); used.add(u)
+        p["images"] = imgs
+    return products_dict
 
-        products.append({
-            "name":p["name"],"sku":p["sku"],"price":p["price"],"compare":p["compare"],
-            "brand":p["brand"] or "Factory Direct Flooring","cat":cat,
-            "images":imgs,"stock":p["stock"],"url":p["url"],
-        })
+# ── PLAYWRIGHT scraper (primary) ───────────────────────────────────────────────
 
-    # HTML card fallback
-    if not products:
-        for m in re.finditer(
-            r'<(?:li|div|article)[^>]*class="[^"]*product[^"]*item[^"]*"[^>]*>(.*?)</(?:li|div|article)>',
-            html, re.DOTALL|re.I
-        ):
-            card=m.group(1)
-            nm=(re.search(r'class="[^"]*product[_\-]name[^"]*"[^>]*>.*?<a[^>]*>(.*?)</a>',card,re.DOTALL|re.I)
-               or re.search(r'<a[^>]+title="([^"]{4,})"',card))
-            name=clean(nm.group(1)) if nm else ""
-            if not name or name in seen: continue
-            seen.add(name)
-            url_m=re.search(r'href=["\'](' + re.escape(BASE_URL) + r'/[^"\'?#]+)["\']',card)
-            prod_url=url_m.group(1) if url_m else ""
-            slug=prod_url.rstrip("/").split("/")[-1].replace(".html","").lower()
-            pm=re.search(r'£\s*([\d,]+\.?\d*)',card)
-            price=pm.group(1).replace(",","") if pm else ""
-            # Card images
-            card_imgs = get_imagely_urls(card)
-            # Also slug-match from all page images
-            if len(card_imgs) < MAX_IMAGES and slug:
-                words = [w for w in slug.replace("-"," ").split() if len(w)>3]
-                for u in all_imgs:
-                    if u in card_imgs or len(card_imgs)>=MAX_IMAGES: continue
-                    ul=u.lower()
-                    if words and (words[0] in ul or sum(1 for w in words if w in ul)>=2):
-                        card_imgs.append(u)
-            products.append({
-                "name":name,"sku":"","price":price,"compare":"",
-                "brand":"Factory Direct Flooring","cat":cat,
-                "images":card_imgs[:MAX_IMAGES],"stock":"active","url":prod_url,
-            })
+def scrape_with_playwright():
+    all_products = {}
 
-    return products, len(all_imgs)
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        context = browser.new_context(
+            viewport={"width":1920,"height":1080},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        )
+        page = context.new_page()
 
-# ── Scrape all categories ──────────────────────────────────────────────────────
+        for cat, url in CATEGORIES:
+            print(f"\n  [{cat}]")
+            page_num = 1
+            cur_url  = f"{url}?product_list_limit=100"
 
-def scrape_all():
-    all_products = []
-    seen_handles = set()
+            while True:
+                try:
+                    print(f"    Page {page_num}...", end=" ", flush=True)
+                    page.goto(cur_url, wait_until="domcontentloaded", timeout=30000)
+                    time.sleep(2)  # wait for JS
 
-    for cat, path in CATEGORIES:
+                    # Scroll to bottom 3 times to trigger lazy loading
+                    for _ in range(5):
+                        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        time.sleep(1.5)
+                    # Scroll back to top and down again
+                    page.evaluate("window.scrollTo(0, 0)")
+                    time.sleep(1)
+                    for _ in range(5):
+                        page.evaluate("window.scrollBy(0, 500)")
+                        time.sleep(0.5)
+
+                    html = page.content()
+                    # Get ALL imagely URLs from fully-rendered page
+                    all_imgs = get_imagely_urls(html)
+                    # Also check all src attributes
+                    img_srcs = page.evaluate("""
+                        () => Array.from(document.querySelectorAll('img'))
+                             .map(i => i.src || i.getAttribute('data-src') || '')
+                             .filter(s => s.includes('imagely'))
+                    """)
+                    for s in img_srcs:
+                        u = str(s).split("?")[0]
+                        if u not in all_imgs and "imagely" in u and len(u)>60:
+                            all_imgs.append(u)
+
+                    prods = parse_products_from_html(html, cat)
+                    prods = assign_images(prods, all_imgs)
+
+                    new = 0
+                    for nm, p in prods.items():
+                        h = make_handle(p.get("url",""),nm)
+                        if h not in {make_handle(x.get("url",""),x["name"]) for x in all_products.values()}:
+                            all_products[nm] = p
+                            new += 1
+
+                    total_imgs = sum(len(p.get("images",[])) for p in all_products.values())
+                    print(f"+{new} prods | page_imgs:{len(all_imgs)} | matched:{total_imgs} | total:{len(all_products)}")
+
+                    if new == 0 and page_num > 1: break
+
+                    # Next page
+                    next_url = None
+                    try:
+                        nxt = page.query_selector("link[rel='next']")
+                        if nxt: next_url = nxt.get_attribute("href")
+                    except: pass
+                    if not next_url:
+                        m = re.search(r'href=["\']([^"\']*[?&]p='+str(page_num+1)+r'[^"\']*)["\']', html)
+                        if m:
+                            n = m.group(1)
+                            next_url = n if n.startswith("http") else BASE_URL + n
+
+                    if not next_url: break
+                    cur_url = next_url
+                    page_num += 1
+                    time.sleep(1)
+
+                except Exception as e:
+                    print(f"ERROR: {e}")
+                    break
+
+        browser.close()
+    return list(all_products.values())
+
+# ── Requests fallback ─────────────────────────────────────────────────────────
+
+def scrape_with_requests():
+    """Fallback if Playwright not available."""
+    HEADERS = {
+        "User-Agent"      : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept"          : "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+        "Accept-Language" : "en-GB,en;q=0.9",
+        "Accept-Encoding" : "gzip, deflate, br",
+        "Connection"      : "keep-alive",
+    }
+    all_products = {}
+
+    for cat, base_url in CATEGORIES:
         print(f"\n  [{cat}]")
-
-        # Try multiple URL variations
-        urls_to_try = [
-            f"{BASE_URL}{path}?product_list_limit=100",
-            f"{BASE_URL}{path}?product_list_limit=48",
-            f"{BASE_URL}{path}",
-        ]
-
-        page     = 1
-        got_html = False
-
-        for start_url in urls_to_try:
-            html = fetch(start_url, timeout=30)
-            if html:
-                got_html  = True
-                cur_url   = start_url
+        for url_try in [f"{base_url}?product_list_limit=100", base_url]:
+            try:
+                r = requests.get(url_try, headers=HEADERS, timeout=25)
+                if r.status_code != 200: continue
+                html = r.text
+                all_imgs = get_imagely_urls(html)
+                prods    = parse_products_from_html(html, cat)
+                prods    = assign_images(prods, all_imgs)
+                new = 0
+                for nm, p in prods.items():
+                    if nm not in all_products:
+                        all_products[nm] = p; new += 1
+                total_imgs = sum(len(p.get("images",[])) for p in all_products.values())
+                print(f"    +{new} prods | imgs:{len(all_imgs)} | matched:{total_imgs} | total:{len(all_products)}")
                 break
-
-        if not got_html:
-            print(f"    FAILED (all URL variants blocked)")
-            continue
-
-        while True:
-            prods, img_count = parse_category_page(html, cat)
-            new = 0
-            for p in prods:
-                h = make_handle(p.get("url",""), p["name"])
-                if h in seen_handles: continue
-                seen_handles.add(h); p["handle"]=h
-                all_products.append(p); new += 1
-
-            total_imgs = sum(len(x["images"]) for x in all_products)
-            print(f"    Page {page}: +{new} prods | page_imgs:{img_count} | matched:{total_imgs} | total:{len(all_products)}")
-
-            if new == 0 and page > 1: break
-
-            # ── FIXED: next_url variable (was 'next' before — Python built-in!) ──
-            next_url = None
-            rel = re.search(
-                r'<link[^>]+rel=["\']next["\'][^>]+href=["\']([^"\']+)["\']', html
-            )
-            if rel:
-                n = rel.group(1)
-                next_url = n if n.startswith("http") else BASE_URL + n
-            else:
-                pg = re.search(
-                    r'href=["\']([^"\']*[?&]p=' + str(page+1) + r'[^"\']*)["\']', html
-                )
-                if pg:
-                    n = pg.group(1)
-                    next_url = n if n.startswith("http") else BASE_URL + n
-
-            if not next_url: break
-            html = fetch(next_url, timeout=30)  # ← FIXED: was cur_url = next (bug!)
-            if not html: break
-            cur_url = next_url
-            page   += 1
-            time.sleep(DELAY)
-
-    return all_products
+            except Exception as e:
+                print(f"    Error: {e}")
+    return list(all_products.values())
 
 # ── Download images ────────────────────────────────────────────────────────────
 
 def download_images(products):
     os.makedirs(IMAGES_DIR, exist_ok=True)
     dl=0; fail=0; idx=0
-
-    print(f"\n  Downloading images...")
+    print(f"\n  Downloading {sum(len(p.get('images',[])) for p in products)} images...")
     for p in products:
-        local = []
+        local=[]
         for img_url in p.get("images",[]):
-            idx  += 1
-            fname = safe_fname(img_url, idx)
-            lpath = os.path.join(IMAGES_DIR, fname)
+            idx+=1
+            fname = safe_fname(img_url,idx)
+            lpath = os.path.join(IMAGES_DIR,fname)
             gh    = f"{IMAGES_BASE}/{fname}"
-
-            if os.path.exists(lpath) and os.path.getsize(lpath) > 1000:
-                local.append(gh); dl += 1; continue
-
+            if os.path.exists(lpath) and os.path.getsize(lpath)>1000:
+                local.append(gh); dl+=1; continue
             try:
-                r = requests.get(img_url, headers=IMG_HDR, timeout=15, stream=True)
-                if r.status_code == 200:
+                r = requests.get(img_url,headers=IMG_HDR,timeout=15,stream=True)
+                if r.status_code==200:
                     with open(lpath,'wb') as f:
                         for chunk in r.iter_content(8192): f.write(chunk)
-                    sz = os.path.getsize(lpath)
-                    if sz > 1000:
-                        local.append(gh); dl += 1
-                    else:
-                        os.remove(lpath); fail += 1
-                else:
-                    fail += 1
-            except: fail += 1
-            time.sleep(0.15)
-
-        p["local_images"] = local
-
-    print(f"  Downloaded: {dl} | Failed: {fail}")
+                    if os.path.getsize(lpath)>1000: local.append(gh); dl+=1
+                    else: os.remove(lpath); fail+=1
+                else: fail+=1
+            except: fail+=1
+            time.sleep(0.1)
+        p["local_images"]=local
+    print(f"  Downloaded:{dl} | Failed:{fail}")
     return products
 
 # ── Build CSV ──────────────────────────────────────────────────────────────────
@@ -493,7 +346,7 @@ def download_images(products):
 def build_rows(p):
     name=(p.get("name") or "").strip()
     if not name: return []
-    handle  = p.get("handle") or make_handle(p.get("url",""),name)
+    handle  = make_handle(p.get("url",""),name)
     cat     = p.get("cat","Flooring")
     body    = build_desc(name,cat)
     vendor  = p.get("brand","").strip() or "Factory Direct Flooring"
@@ -502,10 +355,9 @@ def build_rows(p):
     price   = price_fmt(p.get("price","")) or "0.00"
     compare = price_fmt(p.get("compare",""))
     first   = images[0] if images else ""
-    seo_d   = f"Buy {name} at Factory Direct Flooring — {cat} at competitive prices. Free samples and fast UK delivery."[:320]
-
-    rows = []
-    row1 = {
+    seo_d   = f"Buy {name} at Factory Direct Flooring. {cat} at competitive prices with free UK delivery."[:320]
+    rows=[]
+    row1={
         "Handle":handle,"Title":name,"Body (HTML)":body,"Vendor":vendor,
         "Product Category":"","Type":cat,"Tags":tags,"Published":"TRUE",
         "Option1 Name":"Title","Option1 Value":"Default Title",
@@ -519,8 +371,7 @@ def build_rows(p):
         "SEO Description":seo_d,"Status":p.get("stock","active"),
     }
     if first:
-        row1["Image Src"]=""; row1["Image Src"]=first
-        row1["Image Position"]="1"; row1["Image Alt Text"]=name
+        row1["Image Src"]=first; row1["Image Position"]="1"; row1["Image Alt Text"]=name
     rows.append(row1)
     for i,img in enumerate(images[1:],2):
         e={k:"" for k in SHOPIFY_COLS}
@@ -528,30 +379,31 @@ def build_rows(p):
         rows.append(e)
     return rows
 
-# ── Main ───────────────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    os.makedirs(IMAGES_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_DIR,exist_ok=True)
+    os.makedirs(IMAGES_DIR,exist_ok=True)
     t0=time.time()
-
     print("\n"+"="*65)
-    print("  FACTORY DIRECT FLOORING — SHOPIFY SCRAPER (FIXED)")
-    print(f"  Bug fixed: next_url variable | Aggressive image extraction")
+    print("  FACTORY DIRECT FLOORING — PLAYWRIGHT SCRAPER")
+    print(f"  Playwright: {'YES — full JS rendering' if PLAYWRIGHT_OK else 'NO — using requests'}")
     print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*65)
 
-    products = scrape_all()
+    if PLAYWRIGHT_OK:
+        products = scrape_with_playwright()
+    else:
+        products = scrape_with_requests()
 
     if not products:
-        print("\n  No products found — website may be blocking all requests")
-        with open(f"{OUTPUT_DIR}/factory_flooring_shopify_{TIMESTAMP}.csv",
-                  "w",encoding="utf-8-sig",newline="") as f:
+        print("  No products found")
+        with open(f"{OUTPUT_DIR}/factory_flooring_shopify_{TIMESTAMP}.csv","w",
+                  encoding="utf-8-sig",newline="") as f:
             csv.DictWriter(f,fieldnames=SHOPIFY_COLS).writeheader()
         return
 
     products = download_images(products)
-
     all_rows=[]
     for p in products: all_rows.extend(build_rows(p))
 
@@ -560,31 +412,20 @@ def main():
         writer=csv.DictWriter(f,fieldnames=SHOPIFY_COLS,extrasaction="ignore")
         writer.writeheader(); writer.writerows(all_rows)
 
-    json_file=f"{OUTPUT_DIR}/factory_flooring_{TIMESTAMP}.json"
-    with open(json_file,"w",encoding="utf-8") as f:
-        json.dump([{
-            "name":p["name"],"sku":p.get("sku",""),"price":p.get("price",""),
-            "cat":p["cat"],"images_found":p.get("images",[]),
-            "images_downloaded":p.get("local_images",[]),
-            "img_count":len(p.get("local_images",[])),
-            "url":p.get("url",""),
-        } for p in products],f,ensure_ascii=False,indent=2)
-
     el=round(time.time()-t0)
     with_img=len([p for p in products if p.get("local_images")])
     cats={}
-    for p in products: cats[p["cat"]]=cats.get(p["cat"],0)+1
+    for p in products: cats[p.get("cat","?")]=cats.get(p.get("cat","?"),0)+1
 
     print(f"\n{'='*65}")
     print(f"  DONE in {el//60}m {el%60:02d}s")
     print(f"  Products    : {len(products)}")
     print(f"  CSV rows    : {len(all_rows)}")
     print(f"  With images : {with_img} ({round(with_img/len(products)*100) if products else 0}%)")
-    print(f"\n  By category:")
+    print(f"\n  By category (Smart Collections → Product type is equal to):")
     for cat,count in sorted(cats.items(),key=lambda x:-x[1]):
         print(f"    {cat:<20} {count:>3}")
     print(f"\n  CSV  → {csv_file}")
-    print(f"  Shopify → Products → Import → Upload CSV")
     print("="*65)
 
 if __name__=="__main__":
