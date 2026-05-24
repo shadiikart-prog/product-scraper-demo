@@ -349,7 +349,8 @@ def build_rows(p):
     first  = images[0] if images else ""
     seo_d  = f"Buy {name} at Factory Direct Flooring. {cat} available at competitive prices. Free UK delivery and expert advice. Order free samples today."[:320]
     rows=[]
-    rows.append({
+    # Row 1 — only add Image Src/Position if image actually exists
+    row1 = {
         "Handle":handle,"Title":name,"Body (HTML)":body,"Vendor":vendor,
         "Product Category":"","Type":cat,"Tags":tags,"Published":"TRUE",
         "Option1 Name":"Title","Option1 Value":"Default Title",
@@ -358,11 +359,21 @@ def build_rows(p):
         "Variant Inventory Policy":"deny","Variant Fulfillment Service":"manual",
         "Variant Price":price,"Variant Compare At Price":compare,
         "Variant Requires Shipping":"TRUE","Variant Taxable":"TRUE",
-        "Image Src":first,"Image Position":"1" if first else "","Image Alt Text":name,
+        "Image Src":"","Image Position":"","Image Alt Text":"",
         "SEO Title":f"{name} | Factory Direct Flooring"[:255],
         "SEO Description":seo_d,"Status":p.get("stock","active"),
-    })
+    }
+    # Only set image fields if image URL is valid
+    if first and first.startswith("http"):
+        row1["Image Src"]     = first
+        row1["Image Position"] = "1"
+        row1["Image Alt Text"] = name
+    rows.append(row1)
+
+    # Extra image rows — only if URL is valid
     for i,img in enumerate(images[1:],2):
+        if not img or not img.startswith("http"):
+            continue
         e={k:"" for k in SHOPIFY_COLS}
         e.update({"Handle":handle,"Image Src":img,"Image Position":str(i),"Image Alt Text":name})
         rows.append(e)
