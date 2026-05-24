@@ -6,12 +6,12 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 55
     permissions:
       contents: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -25,19 +25,20 @@ jobs:
         run: pip install requests
 
       - name: Run scraper
-        timeout-minutes: 25
+        timeout-minutes: 50
         run: |
           cd scrapers
           python scraper_factoryflooring_shopify.py
-          echo ""
-          echo "=== Files in output folder ==="
-          ls -la output/ || echo "No output folder!"
+          echo "=== CSV files ==="
+          ls -lh output/*.csv || echo "No CSV"
+          echo "=== Images ==="
+          ls output/images/ | wc -l || echo "No images"
 
-      - name: Commit and push CSV
+      - name: Commit and push everything
         run: |
           git config user.name "scraper-bot"
           git config user.email "bot@example.com"
           git pull origin main --rebase || true
-          git add scrapers/output/ || true
-          git diff --staged --quiet || git commit -m "Factory flooring CSV $(date '+%Y-%m-%d %H:%M')"
-          git push origin main || echo "Nothing to push"
+          git add scrapers/output/
+          git diff --staged --quiet || git commit -m "Factory flooring data + images $(date '+%Y-%m-%d %H:%M')"
+          git push origin main
