@@ -165,10 +165,7 @@ def make_handle(url, name):
     return re.sub(r"[^a-z0-9]+","-",name.lower()).strip("-")[:200]
 
 def card_imgs(card_html, slug=""):
-    """
-    Extract imagely CDN images from ONE product card.
-    URL pattern: imagely.factory-direct-flooring.co.uk/media/catalog/product/...
-    """
+    """Extract imagely CDN images from one product card."""
     found = []
     seen  = set()
 
@@ -180,15 +177,17 @@ def card_imgs(card_html, slug=""):
                 seen.add(u)
                 found.append(u)
 
-    # Pattern: find any imagely URL in any attribute value
-    for m in re.finditer(
-        r'(https://imagely\.factory-direct-flooring\.co\.uk'
-        r'/media/catalog/product/[^"'><\s,\)\\]+)',
-        card_html, re.I
-    ):
-        add(m.group(1))
+    # Find imagely URLs in data-src / src attributes
+    for m in re.finditer(r'(?:data-src|src|data-original|data-lazy)=["\']([^"\'>\s]+)["\']', card_html, re.I):
+        u = m.group(1)
+        if "imagely" in u or "catalog/product" in u:
+            add(u)
 
-    # srcset — parse all URLs
+    # Find bare imagely URLs anywhere in card HTML
+    for m in re.finditer(r'https://imagely\.factory-direct-flooring\.co\.uk/media/catalog/product/[^\s"\'><,\)]+', card_html, re.I):
+        add(m.group(0))
+
+    # srcset
     for m in re.finditer(r'srcset=["\']([^"\']+)["\']', card_html, re.I):
         for part in m.group(1).split(","):
             u = part.strip().split(" ")[0]
@@ -197,11 +196,8 @@ def card_imgs(card_html, slug=""):
 
     # Fallback: any /media/catalog/product/ URL
     if not found:
-        for m in re.finditer(
-            r'(https?://[^"'><\s]+/media/catalog/product/[^"'><\s?]+)',
-            card_html, re.I
-        ):
-            add(m.group(1))
+        for m in re.finditer(r'https?://[^\s"\'><]+/media/catalog/product/[^\s"\'><\?]+', card_html, re.I):
+            add(m.group(0))
 
     return found[:MAX_IMAGES]
 
