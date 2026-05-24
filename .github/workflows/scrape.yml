@@ -11,11 +11,13 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -27,14 +29,15 @@ jobs:
         run: |
           cd scrapers
           python scraper_factoryflooring_shopify.py
-          echo "=== Output files ==="
-          ls -la output/ || echo "No output folder"
+          echo ""
+          echo "=== Files in output folder ==="
+          ls -la output/ || echo "No output folder!"
 
-      - name: Push to GitHub
+      - name: Commit and push CSV
         run: |
-          git config user.name "bot"
-          git config user.email "bot@bot.com"
+          git config user.name "scraper-bot"
+          git config user.email "bot@example.com"
           git pull origin main --rebase || true
           git add scrapers/output/ || true
-          git diff --staged --quiet || git commit -m "Factory flooring CSV $(date '+%Y-%m-%d')"
-          git push origin main
+          git diff --staged --quiet || git commit -m "Factory flooring CSV $(date '+%Y-%m-%d %H:%M')"
+          git push origin main || echo "Nothing to push"
