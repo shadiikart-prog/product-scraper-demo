@@ -30,15 +30,15 @@ jobs:
           cd scrapers
           python scraper_factoryflooring_shopify.py
           echo "=== CSV files ==="
-          ls -lh output/*.csv || echo "No CSV"
-          echo "=== Images ==="
-          ls output/images/ | wc -l || echo "No images"
+          ls -lh output/*.csv 2>/dev/null || echo "No CSV found"
+          echo "=== Images downloaded ==="
+          ls output/images/ 2>/dev/null | wc -l || echo "0 images"
 
-      - name: Commit and push everything
+      - name: Commit and push all files
         run: |
           git config user.name "scraper-bot"
           git config user.email "bot@example.com"
           git pull origin main --rebase || true
           git add scrapers/output/
-          git diff --staged --quiet || git commit -m "Factory flooring data + images $(date '+%Y-%m-%d %H:%M')"
+          git diff --staged --quiet || git commit -m "Factory flooring CSV + images $(date '+%Y-%m-%d %H:%M')"
           git push origin main
