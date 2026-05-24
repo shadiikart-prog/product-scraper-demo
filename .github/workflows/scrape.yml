@@ -21,24 +21,27 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: pip install requests
+      - name: Install Python packages
+        run: pip install requests playwright
+
+      - name: Install Playwright browsers
+        run: playwright install chromium --with-deps
 
       - name: Run scraper
-        timeout-minutes: 50
+        timeout-minutes: 45
         run: |
           cd scrapers
           python scraper_factoryflooring_shopify.py
-          echo "=== CSV files ==="
-          ls -lh output/*.csv 2>/dev/null || echo "No CSV found"
-          echo "=== Images downloaded ==="
+          echo "=== CSV ==="
+          ls -lh output/*.csv 2>/dev/null || echo "No CSV"
+          echo "=== Images ==="
           ls output/images/ 2>/dev/null | wc -l || echo "0 images"
 
-      - name: Commit and push all files
+      - name: Push everything to GitHub
         run: |
           git config user.name "scraper-bot"
           git config user.email "bot@example.com"
           git pull origin main --rebase || true
           git add scrapers/output/
-          git diff --staged --quiet || git commit -m "Factory flooring CSV + images $(date '+%Y-%m-%d %H:%M')"
+          git diff --staged --quiet || git commit -m "Flooring data + images $(date '+%Y-%m-%d %H:%M')"
           git push origin main
