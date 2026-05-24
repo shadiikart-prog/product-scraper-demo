@@ -166,41 +166,45 @@ def make_handle(url, name):
 
 def card_imgs(card_html, slug=""):
     """
-    Extract up to MAX_IMAGES imagely CDN images from a product card.
-    Prioritises images whose URL contains the product slug.
+    Extract imagely CDN images from ONE product card.
+    URL pattern: imagely.factory-direct-flooring.co.uk/media/catalog/product/...
     """
-    found = []; seen = set()
+    found = []
+    seen  = set()
+
     def add(u):
         u = str(u).strip().split("?")[0]
-        if (u.startswith("http") and len(u)>40
-                and "placeholder" not in u.lower()
-                and not u.endswith(".gif")
-                and u not in seen):
-            seen.add(u); found.append(u)
+        if ("imagely.factory-direct-flooring.co.uk" in u or
+                "factory-direct-flooring.co.uk/media/catalog" in u):
+            if u not in seen and len(u) > 50:
+                seen.add(u)
+                found.append(u)
 
-    # data-src (lazy load — most common in Hyva/Magento)
-    for m in re.finditer(r'data-src=["\']([^"\'>\s]+)["\']', card_html, re.I): add(m.group(1))
-    # src on img tags
-    for m in re.finditer(r'<img[^>]+src=["\']([^"\'>\s]+)["\']', card_html, re.I):
-        u = m.group(1)
-        if "placeholder" not in u and not u.endswith(".gif"): add(u)
-    # data-original
-    for m in re.finditer(r'data-original=["\']([^"\'>\s]+)["\']', card_html, re.I): add(m.group(1))
-    # srcset first URL
+    # Pattern: find any imagely URL in any attribute value
+    for m in re.finditer(
+        r'(https://imagely\.factory-direct-flooring\.co\.uk'
+        r'/media/catalog/product/[^"'><\s,\)\\]+)',
+        card_html, re.I
+    ):
+        add(m.group(1))
+
+    # srcset — parse all URLs
     for m in re.finditer(r'srcset=["\']([^"\']+)["\']', card_html, re.I):
-        u = m.group(1).split(",")[0].strip().split(" ")[0]
-        if u: add(u)
+        for part in m.group(1).split(","):
+            u = part.strip().split(" ")[0]
+            if "imagely" in u or "catalog/product" in u:
+                add(u)
 
-    # Prefer imagely CDN
-    imagely = [u for u in found if "imagely" in u or "factory-direct-flooring" in u]
-    chosen  = imagely if imagely else found
+    # Fallback: any /media/catalog/product/ URL
+    if not found:
+        for m in re.finditer(
+            r'(https?://[^"'><\s]+/media/catalog/product/[^"'><\s?]+)',
+            card_html, re.I
+        ):
+            add(m.group(1))
 
-    # Prefer images that contain the product slug for accuracy
-    if slug:
-        slug_imgs = [u for u in chosen if slug in u]
-        if slug_imgs: return slug_imgs[:MAX_IMAGES]
+    return found[:MAX_IMAGES]
 
-    return chosen[:MAX_IMAGES]
 
 # ─── Parse category page ──────────────────────────────────────────────────────
 
